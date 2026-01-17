@@ -1,6 +1,6 @@
 import { Preferences } from '@capacitor/preferences';
 import { Device } from '@capacitor/device';
-import { Filesystem, FilesystemDirectory } from '@capacitor/filesystem';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
 
 const isElectron = !!(window.electron);
@@ -49,11 +49,21 @@ const PlatformService = {
             return await window.electron.selectFolder();
         }
         // Android: request storage permission and use default Music folder
-        if (Capacitor.getPlatform && Capacitor.getPlatform() === 'android') {
-            const status = await Filesystem.requestPermissions();
-            if (status.publicStorage !== 'granted') {
-                alert('Storage permission denied. Unable to access music files.');
-                return null;
+        if (Capacitor.getPlatform() === 'android') {
+            try {
+                const status = await Filesystem.requestPermissions();
+                // On Android 13+, it might be 'granted' but for specific media types
+                // or 'status.publicStorage' might be the key
+                if (status.publicStorage !== 'granted' && status.storage !== 'granted') {
+                    // Check if it's already granted
+                    const check = await Filesystem.checkPermissions();
+                    if (check.publicStorage !== 'granted' && check.storage !== 'granted') {
+                        alert('Storage permission is required to access music files. Please enable it in Settings.');
+                        return null;
+                    }
+                }
+            } catch (e) {
+                console.error("Permission request failed", e);
             }
         }
         // Return the common external music directory
@@ -65,15 +75,23 @@ const PlatformService = {
             return await window.electron.scanFolder(path);
         }
         // Android: read external storage directory for audio files
-        if (Capacitor.getPlatform && Capacitor.getPlatform() === 'android') {
+        if (Capacitor.getPlatform() === 'android') {
             try {
                 const result = await Filesystem.readdir({
                     path,
-                    directory: FilesystemDirectory.External
+                    directory: Directory.External
                 });
-                // Filter common audio extensions
-                const audioFiles = result.files.filter(f => /\.(mp3|flac|wav|m4a)$/i.test(f));
-                return audioFiles.map(f => ({ path: `${path}/${f}` }));
+
+                // Capacitor 6+ readdir results have a 'files' array of objects or strings
+                const audioFiles = result.files.filter(f => {
+                    const name = typeof f === 'string' ? f : f.name;
+                    return /\.(mp3|flac|wav|m4a)$/i.test(name);
+                });
+
+                return audioFiles.map(f => ({
+                    path: `${path}/${typeof f === 'string' ? f : f.name}`,
+                    name: typeof f === 'string' ? f : f.name
+                }));
             } catch (e) {
                 console.error('Failed to read music folder', e);
                 return [];
