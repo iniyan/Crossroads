@@ -8,6 +8,7 @@ import MiniPlayer from './components/MiniPlayer';
 import LyricsView from './components/LyricsView';
 import { Minimize2, Maximize2, Minus, Square, X } from 'lucide-react';
 import './styles/global.css';
+import Platform from './services/PlatformService';
 
 export default function App() {
     const [songs, setSongs] = useState([]);
@@ -39,27 +40,25 @@ export default function App() {
     // Initial Data Load
     useEffect(() => {
         async function loadData() {
-            if (window.electron) {
-                const savedStats = await window.electron.getStore('stats');
-                if (savedStats) setStats(savedStats);
+            const savedStats = await Platform.getStore('stats');
+            if (savedStats) setStats(savedStats);
 
-                const savedPlaylists = await window.electron.getStore('playlists');
-                if (savedPlaylists) setPlaylists(savedPlaylists);
+            const savedPlaylists = await Platform.getStore('playlists');
+            if (savedPlaylists) setPlaylists(savedPlaylists);
 
-                const savedFavs = await window.electron.getStore('favorites');
-                if (savedFavs) setFavorites(savedFavs);
+            const savedFavs = await Platform.getStore('favorites');
+            if (savedFavs) setFavorites(savedFavs);
 
-                const savedFolder = await window.electron.getStore('musicFolder');
-                if (savedFolder) scanAndSetSongs(savedFolder);
-            }
+            const savedFolder = await Platform.getStore('musicFolder');
+            if (savedFolder) scanAndSetSongs(savedFolder);
         }
         loadData();
     }, []);
 
     // persistence
-    useEffect(() => { if (window.electron) window.electron.setStore('stats', stats); }, [stats]);
-    useEffect(() => { if (window.electron) window.electron.setStore('playlists', playlists); }, [playlists]);
-    useEffect(() => { if (window.electron) window.electron.setStore('favorites', favorites); }, [favorites]);
+    useEffect(() => { Platform.setStore('stats', stats); }, [stats]);
+    useEffect(() => { Platform.setStore('playlists', playlists); }, [playlists]);
+    useEffect(() => { Platform.setStore('favorites', favorites); }, [favorites]);
 
     const generateShuffledQueue = (originalQueue, currentSongPath) => {
         let newQueue = [...originalQueue];
@@ -78,7 +77,7 @@ export default function App() {
     const playAtIndex = useCallback((index, currentQueue) => {
         const song = currentQueue[index];
         if (!song) return;
-        audioRef.current.src = `file://${song.path}`;
+        audioRef.current.src = Platform.convertFileSrc(song.path);
         audioRef.current.play();
         setIsPlaying(true);
         setStats(prev => ({
@@ -132,16 +131,17 @@ export default function App() {
             else if (e.code === 'ArrowLeft') playPrev();
         };
         window.addEventListener('keydown', handleKeyDown);
-        if (window.electron) {
-            window.electron.onShortcut((event, type) => {
-                if (type === 'playPause') togglePlay();
-                if (type === 'next') playNext();
-                if (type === 'prev') playPrev();
-            });
-            window.electron.onMenuScan(() => {
-                loadSongs();
-            });
-        }
+
+        Platform.onShortcut((event, type) => {
+            if (type === 'playPause') togglePlay();
+            if (type === 'next') playNext();
+            if (type === 'prev') playPrev();
+        });
+
+        Platform.onMenuScan(() => {
+            loadSongs();
+        });
+
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [togglePlay, playNext, playPrev]);
 
@@ -175,16 +175,15 @@ export default function App() {
     }, [isPlaying]);
 
     const scanAndSetSongs = async (folder) => {
-        const scannedSongs = await window.electron.scanFolder(folder);
+        const scannedSongs = await Platform.scanFolder(folder);
         setSongs(scannedSongs);
         if (view === 'dashboard' && scannedSongs.length > 0) setView('library');
     };
 
     const loadSongs = async () => {
-        if (!window.electron) return;
-        const folder = await window.electron.selectFolder();
+        const folder = await Platform.selectFolder();
         if (folder) {
-            window.electron.setStore('musicFolder', folder);
+            Platform.setStore('musicFolder', folder);
             scanAndSetSongs(folder);
         }
     };
@@ -264,9 +263,9 @@ export default function App() {
     const changeVolume = (vol) => { audioRef.current.volume = vol; setVolume(vol); };
 
     const toggleMiniMode = () => {
-        if (!window.electron) return;
-        if (!miniMode) { window.electron.resize(300, 330); setMiniMode(true); }
-        else { window.electron.resize(1000, 800); setMiniMode(false); }
+        if (!Platform.isElectron()) return;
+        if (!miniMode) { Platform.resize(300, 330); setMiniMode(true); }
+        else { Platform.resize(1000, 800); setMiniMode(false); }
     };
 
     const currentSong = isShuffle ? shuffledQueue[playIndex] : queue[playIndex];
@@ -295,7 +294,7 @@ export default function App() {
         );
     }
 
-    const isMac = window.electron?.platform === 'darwin';
+    const isMac = window.electron?.platform === 'darwin' || (Platform.isElectron() && navigator.platform.includes('Mac'));
 
     return (
         <div className="layout">
@@ -308,11 +307,11 @@ export default function App() {
                     <Minimize2 size={16} />
                 </button>
 
-                {!isMac && (
+                {!isMac && Platform.isElectron() && (
                     <div className="window-controls">
-                        <button onClick={() => window.electron.minimize()} title="Minimize"><Minus size={16} /></button>
-                        <button onClick={() => window.electron.maximize()} title="Maximize"><Square size={14} /></button>
-                        <button onClick={() => window.electron.close()} className="btn-close" title="Close"><X size={16} /></button>
+                        <button onClick={() => Platform.minimize()} title="Minimize"><Minus size={16} /></button>
+                        <button onClick={() => Platform.maximize()} title="Maximize"><Square size={14} /></button>
+                        <button onClick={() => Platform.close()} className="btn-close" title="Close"><X size={16} /></button>
                     </div>
                 )}
             </div>

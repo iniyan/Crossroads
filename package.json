@@ -8,7 +8,9 @@
         "dev": "concurrently \"vite\" \"wait-on tcp:5173 && electron .\"",
         "build": "vite build",
         "dist": "npm run build && electron-builder",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "mobile:sync": "npm run build && npx cap sync",
+        "mobile:open": "npx cap open android"
     },
     "build": {
         "appId": "com.crossroads.player",
@@ -43,6 +45,13 @@
         }
     },
     "dependencies": {
+        "@capacitor/android": "^8.0.1",
+        "@capacitor/app": "^8.0.0",
+        "@capacitor/cli": "^8.0.1",
+        "@capacitor/core": "^8.0.1",
+        "@capacitor/device": "^8.0.0",
+        "@capacitor/filesystem": "^8.0.0",
+        "@capacitor/preferences": "^8.0.0",
         "date-fns": "^3.3.1",
         "electron-store": "^8.1.0",
         "lucide-react": "^0.309.0",
