@@ -1,6 +1,6 @@
 import { Preferences } from '@capacitor/preferences';
 import { Device } from '@capacitor/device';
-import { Filesystem } from '@capacitor/filesystem';
+import { Filesystem, FilesystemDirectory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
 
 const isElectron = !!(window.electron);
@@ -48,18 +48,38 @@ const PlatformService = {
         if (isElectron) {
             return await window.electron.selectFolder();
         }
-        // For Android, we might use a simple picker or a fixed directory for now
-        // This part is complex on mobile due to Scoped Storage
-        alert("Folder selection on Android is handled via system media scanning in this version.");
-        return "/storage/emulated/0/Music";
+        // Android: request storage permission and use default Music folder
+        if (Capacitor.getPlatform && Capacitor.getPlatform() === 'android') {
+            const status = await Filesystem.requestPermissions();
+            if (status.publicStorage !== 'granted') {
+                alert('Storage permission denied. Unable to access music files.');
+                return null;
+            }
+        }
+        // Return the common external music directory
+        return '/storage/emulated/0/Music';
     },
 
     scanFolder: async (path) => {
         if (isElectron) {
             return await window.electron.scanFolder(path);
         }
-        // On Mobile, we'd typically use a native plugin to scan the MediaStore
-        // For a prototype, we return an empty list or mock data
+        // Android: read external storage directory for audio files
+        if (Capacitor.getPlatform && Capacitor.getPlatform() === 'android') {
+            try {
+                const result = await Filesystem.readdir({
+                    path,
+                    directory: FilesystemDirectory.External
+                });
+                // Filter common audio extensions
+                const audioFiles = result.files.filter(f => /\.(mp3|flac|wav|m4a)$/i.test(f));
+                return audioFiles.map(f => ({ path: `${path}/${f}` }));
+            } catch (e) {
+                console.error('Failed to read music folder', e);
+                return [];
+            }
+        }
+        // Fallback for other platforms
         return [];
     },
 
