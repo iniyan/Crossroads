@@ -6,7 +6,7 @@ import Library from './components/Library';
 import PlaylistView from './components/PlaylistView';
 import MiniPlayer from './components/MiniPlayer';
 import LyricsView from './components/LyricsView';
-import { Minimize2, Maximize2, Minus, Square, X } from 'lucide-react';
+import { Minimize2, Maximize2, Minus, Square, X, Menu } from 'lucide-react';
 import './styles/global.css';
 import Platform from './services/PlatformService';
 
@@ -33,9 +33,22 @@ export default function App() {
         { id: 'recent', name: 'Recently Played', type: 'smart' },
         { id: 'recommendations', name: 'Discovery', type: 'smart' }
     ]);
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+    const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768);
 
     const audioRef = useRef(new Audio());
     const statsInterval = useRef(null);
+
+    // Mobile Detection
+    useEffect(() => {
+        const handleResize = () => {
+            const mobile = window.innerWidth < 768;
+            setIsMobile(mobile);
+            if (!mobile) setSidebarOpen(true);
+        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     // Initial Data Load
     useEffect(() => {
@@ -297,30 +310,47 @@ export default function App() {
     const isMac = window.electron?.platform === 'darwin' || (Platform.isElectron() && navigator.platform.includes('Mac'));
 
     return (
-        <div className="layout">
-            <div className="titlebar" style={{ justifyContent: 'flex-end', paddingRight: 10 }}>
-                <button
-                    onClick={toggleMiniMode}
-                    title="Mini Player"
-                    style={{ marginRight: isMac ? 10 : 0 }}
-                >
-                    <Minimize2 size={16} />
-                </button>
+        <div className={`layout ${isMobile ? 'is-mobile' : ''}`}>
+            <div className="titlebar" style={{ justifyContent: 'space-between', paddingRight: 10, paddingLeft: 10 }}>
+                <div className="titlebar-left">
+                    {isMobile && (
+                        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="menu-toggle">
+                            <Menu size={20} />
+                        </button>
+                    )}
+                </div>
+                <div className="titlebar-right" style={{ display: 'flex', gap: 10 }}>
+                    <button
+                        onClick={toggleMiniMode}
+                        title="Mini Player"
+                        style={{ marginRight: (isMac && !isMobile) ? 10 : 0 }}
+                    >
+                        <Minimize2 size={16} />
+                    </button>
 
-                {!isMac && Platform.isElectron() && (
-                    <div className="window-controls">
-                        <button onClick={() => Platform.minimize()} title="Minimize"><Minus size={16} /></button>
-                        <button onClick={() => Platform.maximize()} title="Maximize"><Square size={14} /></button>
-                        <button onClick={() => Platform.close()} className="btn-close" title="Close"><X size={16} /></button>
-                    </div>
-                )}
+                    {!isMac && Platform.isElectron() && (
+                        <div className="window-controls">
+                            <button onClick={() => Platform.minimize()} title="Minimize"><Minus size={16} /></button>
+                            <button onClick={() => Platform.maximize()} title="Maximize"><Square size={14} /></button>
+                            <button onClick={() => Platform.close()} className="btn-close" title="Close"><X size={16} /></button>
+                        </div>
+                    )}
+                </div>
             </div>
             <div className="app-container">
-                <Sidebar
-                    view={view} setView={setView} onScan={loadSongs} playlists={playlists}
-                    smartPlaylists={smartPlaylists} onCreatePlaylist={createPlaylist}
-                    onOpenPlaylist={openPlaylist} selectedPlaylistId={selectedPlaylistId}
-                />
+                <div className={`sidebar-wrapper ${sidebarOpen ? 'open' : 'closed'}`}>
+                    <Sidebar
+                        view={view}
+                        setView={(v) => { setView(v); if (isMobile) setSidebarOpen(false); }}
+                        onScan={loadSongs}
+                        playlists={playlists}
+                        smartPlaylists={smartPlaylists}
+                        onCreatePlaylist={createPlaylist}
+                        onOpenPlaylist={(id) => { openPlaylist(id); if (isMobile) setSidebarOpen(false); }}
+                        selectedPlaylistId={selectedPlaylistId}
+                    />
+                    {isMobile && sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+                </div>
                 <main className="main-content">
                     {view === 'dashboard' && <Dashboard stats={stats} allSongs={songs} onPlaySong={playSong} />}
                     {view === 'library' && (

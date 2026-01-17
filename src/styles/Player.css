@@ -368,3 +368,30 @@ input[type=range].seek-slider:active::-webkit-slider-thumb {
     color: var(--accent-monitor);
     font-weight: 600;
 }
+
+/* Mobile Optimizations */
+@media (max-width: 768px) {
+    .player-bar {
+        padding: 0 15px;
+        gap: 10px;
+    }
+
+    .track-info {
+        width: auto;
+        flex: 1;
+    }
+
+    .audio-tech-info,
+    .volume-controls {
+        display: none;
+    }
+
+    .main-controls {
+        gap: 12px;
+    }
+
+    .track-art {
+        width: 44px;
+        height: 44px;
+    }
+}
