@@ -1,0 +1,249 @@
+.mini-player {
+    width: 100%;
+    height: 100%;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    user-select: none;
+}
+
+.mini-content-area {
+    flex: 1;
+    overflow-y: auto;
+    position: relative;
+    scrollbar-width: none;
+}
+
+.mini-content-area::-webkit-scrollbar {
+    display: none;
+}
+
+.mini-now-playing {
+    display: flex;
+    flex-direction: column;
+}
+
+.mini-art {
+    width: 100%;
+    max-height: 240px;
+    position: relative;
+    overflow: hidden;
+    background: #111;
+}
+
+.mini-art img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.mini-song-info-tab {
+    padding: 15px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.mini-song-info-tab .mini-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.mini-song-info-tab .mini-artist {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Persistent Controls Area */
+.mini-persistent-controls {
+    background: #111;
+    padding: 12px 15px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.mini-progress-section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mini-time-text {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 25px;
+}
+
+.mini-progress-bar-wrapper {
+    flex: 1;
+    height: 3px;
+    position: relative;
+}
+
+.mini-seek-slider {
+    width: 100%;
+    height: 3px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    outline: none;
+    background-image: linear-gradient(var(--accent-monitor), var(--accent-monitor));
+    background-repeat: no-repeat;
+}
+
+.mini-seek-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 10px;
+    width: 10px;
+    border-radius: 50%;
+    background: #fff;
+    cursor: pointer;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.mini-persistent-controls:hover .mini-seek-slider::-webkit-slider-thumb {
+    opacity: 1;
+}
+
+.mini-main-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+}
+
+.mini-icon-btn {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    padding: 5px;
+    transition: all 0.2s;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.mini-icon-btn:hover {
+    color: #fff;
+    transform: scale(1.1);
+}
+
+.mini-icon-btn.active {
+    color: var(--accent-monitor);
+}
+
+.mini-play-btn {
+    width: 38px;
+    height: 38px;
+    background: #fff;
+    border: none;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.mini-play-btn:hover {
+    transform: scale(1.1);
+}
+
+.mini-repeat-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    font-size: 8px;
+    font-weight: 800;
+}
+
+/* Tabs */
+.mini-tabs {
+    height: 48px;
+    display: flex;
+    background: #000;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.mini-tab-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.mini-tab-btn.active {
+    color: var(--accent-monitor);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+/* Tab Specific adjustments */
+.mini-lyrics-container {
+    height: 100%;
+}
+
+.mini-queue-container {
+    padding: 10px 0;
+}
+
+.mini-queue-header {
+    font-size: 10px;
+    font-weight: 800;
+    color: var(--text-secondary);
+    padding: 0 15px 10px;
+    letter-spacing: 1px;
+}
+
+.mini-queue-item {
+    padding: 8px 15px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+}
+
+.mini-queue-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.mini-queue-item.active {
+    background: rgba(0, 229, 255, 0.05);
+}
+
+.mini-queue-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.mini-queue-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+
+.mini-queue-artist {
+    font-size: 11px;
+    color: var(--text-secondary);
+}

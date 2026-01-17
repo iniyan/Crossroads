@@ -1,0 +1,19 @@
+# Desktop App Artifacts
+node_modules/
+dist/
+release/
+*.log
+
+# IDE and OS
+.DS_Store
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+
+# Build artifacts
+out/
+build/
+package-lock.json (optional, but keep it for consistency)

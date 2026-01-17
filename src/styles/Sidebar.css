@@ -1,0 +1,169 @@
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 30px;
+    padding: 0 10px;
+}
+
+.brand h2 {
+    font-size: 20px;
+    margin: 0;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+
+.brand-logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    filter: drop-shadow(0 0 10px rgba(205, 127, 50, 0.3));
+}
+
+.nav-items {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 12px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.nav-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.nav-item.active {
+    background: linear-gradient(90deg, rgba(124, 77, 255, 0.2) 0%, transparent 100%);
+    color: var(--accent-monitor);
+    border-left: 3px solid var(--accent-monitor);
+}
+
+.scan-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-weight: 500;
+    margin-top: 20px;
+}
+
+.scan-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--text-primary);
+}
+
+.section-title {
+    margin-top: 30px;
+    padding: 0 12px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 700;
+    letter-spacing: 1px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.section-title button {
+    font-size: 16px;
+    color: var(--text-secondary);
+    padding: 0 5px;
+}
+
+.section-title button:hover {
+    color: white;
+}
+
+.playlist-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 10px;
+    overflow-y: auto;
+    max-height: 300px;
+}
+
+.nav-item.sm {
+    padding: 8px 12px;
+    font-size: 14px;
+}
+
+.inline-create {
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 12px;
+    margin: 5px 0;
+}
+
+.inline-create input {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: white;
+    font-size: 13px;
+    width: 100%;
+}
+
+.inline-create .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.inline-create .actions button {
+    padding: 4px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.btn-save {
+    background: var(--accent-color);
+    color: white !important;
+}
+
+.btn-cancel {
+    color: var(--text-secondary) !important;
+}
+
+.btn-cancel:hover {
+    color: white !important;
+}
+
+.add-pl-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    color: var(--text-secondary);
+}
+
+.add-pl-btn:hover {
+    background: var(--accent-color);
+    color: white;
+    transform: scale(1.1);
+}
