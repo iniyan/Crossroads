@@ -6,7 +6,7 @@ import Library from './components/Library';
 import PlaylistView from './components/PlaylistView';
 import MiniPlayer from './components/MiniPlayer';
 import LyricsView from './components/LyricsView';
-import { Minimize2, Maximize2, Minus, Square, X, Menu } from 'lucide-react';
+import { Minimize2, Maximize2, Minus, Square, X, Menu, Sun, Moon } from 'lucide-react';
 import './styles/global.css';
 import Platform from './services/PlatformService';
 
@@ -35,6 +35,7 @@ export default function App() {
     ]);
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
     const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768);
+    const [theme, setTheme] = useState('dark');
 
     const audioRef = useRef(new Audio());
     const statsInterval = useRef(null);
@@ -64,9 +65,18 @@ export default function App() {
 
             const savedFolder = await Platform.getStore('musicFolder');
             if (savedFolder) scanAndSetSongs(savedFolder);
+
+            const savedTheme = await Platform.getStore('theme');
+            if (savedTheme) setTheme(savedTheme);
         }
         loadData();
     }, []);
+
+    // Apply theme
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', theme);
+        Platform.setStore('theme', theme);
+    }, [theme]);
 
     // persistence
     useEffect(() => { Platform.setStore('stats', stats); }, [stats]);
@@ -320,6 +330,13 @@ export default function App() {
                     )}
                 </div>
                 <div className="titlebar-right" style={{ display: 'flex', gap: 10 }}>
+                    <button
+                        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                        title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+                    >
+                        {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                    </button>
+
                     <button
                         onClick={toggleMiniMode}
                         title="Mini Player"

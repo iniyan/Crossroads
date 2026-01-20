@@ -1,13 +1,26 @@
 :root {
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --accent-color: #CD7F32;
+  --accent-monitor: #22d3ee;
+
+  /* Dark Theme (Default) */
   --bg-color: #08080c;
   --sidebar-bg: rgba(12, 12, 18, 0.4);
   --player-bg: rgba(12, 12, 18, 0.7);
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
-  --accent-color: #CD7F32;
-  --accent-monitor: #22d3ee;
   --glass-border: 1px solid rgba(255, 255, 255, 0.05);
-  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --main-gradient: linear-gradient(135deg, rgba(13, 13, 18, 0) 0%, rgba(205, 127, 50, 0.1) 100%);
+}
+
+[data-theme="light"] {
+  --bg-color: #f8fafc;
+  --sidebar-bg: rgba(241, 245, 249, 0.8);
+  --player-bg: rgba(255, 255, 255, 0.9);
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --glass-border: 1px solid rgba(15, 23, 42, 0.1);
+  --main-gradient: linear-gradient(135deg, #f8fafc 0%, rgba(205, 127, 50, 0.05) 100%);
 }
 
 * {
@@ -79,6 +92,17 @@ body {
   align-items: center;
 }
 
+.menu-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: var(--text-primary);
+  -webkit-app-region: no-drag;
+  cursor: pointer;
+}
+
 .window-controls {
   display: flex;
   height: 100%;
@@ -132,6 +156,10 @@ body {
   transform: translateX(-100%);
 }
 
+.is-mobile .sidebar-wrapper.open {
+  transform: translateX(0);
+}
+
 .sidebar-overlay {
   position: fixed;
   top: 0;
@@ -141,6 +169,7 @@ body {
   background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(4px);
   z-index: 40;
+  display: none;
 }
 
 .sidebar {
@@ -162,7 +191,7 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 30px;
-  background: linear-gradient(135deg, rgba(13, 13, 18, 0) 0%, rgba(205, 127, 50, 0.1) 100%);
+  background: var(--main-gradient);
 }
 
 .player-bar {
