@@ -4,6 +4,9 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const { Readable } = require('stream');
 const Store = require('electron-store');
+const { scanLibrary, readTrackDetails, isInside, AUDIO_EXTENSIONS, ART_HOST } = require('./libraryScanner');
+const { LibraryIndex } = require('./libraryIndex');
+const { readEmbeddedPicture } = require('./artwork');
 
 const store = new Store();
 
@@ -24,7 +27,7 @@ const CONTENT_SECURITY_POLICY = [
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    `img-src 'self' data: blob: ${MEDIA_SCHEME}:`,
     `media-src 'self' blob: ${MEDIA_SCHEME}:`,
     `connect-src 'self' https://lrclib.net ${MEDIA_SCHEME}:`,
     "font-src 'self' data:",
@@ -52,13 +55,8 @@ const APP_MIME_TYPES = {
     '.txt': 'text/plain; charset=utf-8'
 };
 
-// How many directory entries (subfolders / symlinks) a single folder scans in parallel.
-const SCAN_CONCURRENCY = 8;
-
 // Keys the renderer may read/write through the store bridge.
 const STORE_KEYS = new Set(['stats', 'playlists', 'favorites', 'theme', 'musicFolder']);
-
-const AUDIO_EXTENSIONS = new Set(['.flac', '.mp3', '.m4a', '.wav', '.ogg', '.opus', '.aac']);
 
 const MIME_TYPES = {
     '.flac': 'audio/flac',
@@ -67,7 +65,11 @@ const MIME_TYPES = {
     '.wav': 'audio/wav',
     '.ogg': 'audio/ogg',
     '.opus': 'audio/ogg',
-    '.aac': 'audio/aac'
+    '.aac': 'audio/aac',
+    '.aiff': 'audio/aiff',
+    '.aif': 'audio/aiff',
+    '.ape': 'audio/x-ape',
+    '.wv': 'audio/x-wavpack'
 };
 
 const WINDOW_MIN_WIDTH = 200;
@@ -117,17 +119,6 @@ function getWindow() {
 function sendToRenderer(channel, ...args) {
     const win = getWindow();
     if (win) win.webContents.send(channel, ...args);
-}
-
-// Returns true when `candidate` (already resolved) sits inside `root` (already resolved).
-// path.relative() normalises the result, so an escape can only show up as a leading '..'
-// segment; a name that merely starts with dots ('...And Justice for All') is fine.
-function isInside(root, candidate) {
-    if (!root || !candidate) return false;
-    const rel = path.relative(root, candidate);
-    if (rel === '') return true;
-    if (path.isAbsolute(rel)) return false;
-    return rel !== '..' && !rel.startsWith('..' + path.sep);
 }
 
 // True for URLs on the app's own origin (crossroads-app://app/...). Node's URL exposes
@@ -335,11 +326,12 @@ async function handleAppRequest(request) {
 }
 
 // --- crossroads-media://track/<encodeURIComponent(absolutePath)> -------------------------------
+// --- crossroads-media://art/<encodeURIComponent(absolutePath)>  (embedded picture) -------------
 
-async function resolveMediaPath(requestUrl) {
+async function resolveMediaPath(requestUrl, host = MEDIA_HOST) {
     let url;
     try { url = new URL(requestUrl); } catch { return null; }
-    if (url.protocol !== `${MEDIA_SCHEME}:` || url.host !== MEDIA_HOST) return null;
+    if (url.protocol !== `${MEDIA_SCHEME}:` || url.host !== host) return null;
 
     let decoded;
     try { decoded = decodeURIComponent(url.pathname.replace(/^\/+/, '')); } catch { return null; }
@@ -388,10 +380,31 @@ function parseRange(header, size) {
     return { start, end };
 }
 
+async function handleArtRequest(request) {
+    const filePath = await resolveMediaPath(request.url, ART_HOST);
+    if (!filePath) return textResponse(403, 'Forbidden');
+    if (typeof filePath !== 'string') return textResponse(404, 'Not Found');
+    if (!AUDIO_EXTENSIONS.has(path.extname(filePath).toLowerCase())) return textResponse(403, 'Forbidden');
+
+    const picture = await readEmbeddedPicture(filePath);
+    if (!picture) return textResponse(404, 'Not Found');
+    const headers = {
+        'Content-Type': picture.format,
+        'Content-Length': String(picture.data.length),
+        'Cache-Control': 'max-age=86400'
+    };
+    if (request.method === 'HEAD') return new Response(null, { status: 200, headers });
+    return new Response(picture.data, { status: 200, headers });
+}
+
 async function handleMediaRequest(request) {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
         return textResponse(405, 'Method Not Allowed');
     }
+
+    let host = null;
+    try { host = new URL(request.url).host; } catch { return textResponse(400, 'Bad Request'); }
+    if (host === ART_HOST) return handleArtRequest(request);
 
     const filePath = await resolveMediaPath(request.url);
     if (!filePath) return textResponse(403, 'Forbidden');
@@ -478,109 +491,85 @@ ipcMain.handle('store:set', (_event, key, value) => {
     }
 });
 
-// Runs `fn` over `items` with at most `limit` in flight at once.
-async function mapLimit(items, limit, fn) {
-    let next = 0;
-    const worker = async () => {
-        while (next < items.length) {
-            await fn(items[next++]);
-        }
-    };
-    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+// The persistent library index (userData/library-index.json): unchanged files are served
+// from it instead of being re-parsed. One scan at a time; a second request waits, and
+// single-track detail reads queue behind scans so index writes stay serialised.
+let libraryIndexPromise = null;
+let scanInFlight = Promise.resolve();
+
+// The renderer's LIBRARY_MODEL_VERSION (src/library/song.js) as sent with the request.
+function modelVersionOf(options) {
+    const v = options && typeof options === 'object' ? options.modelVersion : undefined;
+    return Number.isInteger(v) && v >= 0 ? v : 0;
 }
 
-async function getFilesRecursively(dir, realRoot, out = []) {
-    let dirents;
+function enqueueIndexJob(run) {
+    const result = scanInFlight.then(run, run);
+    scanInFlight = result.catch(() => {});
+    return result;
+}
+
+// A file the renderer may ask details for: inside the music root (lexically and after
+// resolving symlinks) with an audio extension. Returns the real path or null.
+async function resolveLibraryFile(filePath) {
+    if (typeof filePath !== 'string' || filePath.length === 0 || filePath.includes('\0')) return null;
+    const root = allowedMusicRoot;
+    if (!root) return null;
+    const requested = path.resolve(filePath);
+    if (!isInside(root, requested)) return null;
+    if (!AUDIO_EXTENSIONS.has(path.extname(requested).toLowerCase())) return null;
     try {
-        dirents = await fsp.readdir(dir, { withFileTypes: true });
-    } catch (e) {
-        console.warn('Skipping unreadable directory', dir, e.message);
-        return out;
+        const [realRoot, realFile] = await Promise.all([fsp.realpath(root), fsp.realpath(requested)]);
+        return isInside(realRoot, realFile) ? realFile : null;
+    } catch {
+        return null;
     }
-
-    const subdirs = [];
-    const symlinks = [];
-    for (const dirent of dirents) {
-        const res = path.resolve(dir, dirent.name);
-        if (dirent.isDirectory()) subdirs.push(res);
-        else if (dirent.isFile()) out.push(res);
-        else if (dirent.isSymbolicLink()) symlinks.push(res);
-    }
-
-    // Never follow symlinked directories (loop protection). Symlinked files are fine
-    // as long as they resolve to somewhere inside the music root.
-    await mapLimit(symlinks, SCAN_CONCURRENCY, async (res) => {
-        try {
-            const real = await fsp.realpath(res);
-            const st = await fsp.stat(real);
-            if (st.isFile() && isInside(realRoot, real)) out.push(res);
-        } catch {
-            // Broken symlink or unreadable target; ignore.
-        }
-    });
-    await mapLimit(subdirs, SCAN_CONCURRENCY, (sub) => getFilesRecursively(sub, realRoot, out));
-    return out;
 }
 
-function detectFormat(file, metadata) {
-    const ext = path.extname(file).slice(1).toUpperCase();
-    const codec = String(metadata?.format?.codec || '').toUpperCase();
-    const container = String(metadata?.format?.container || '').toUpperCase();
-    if (ext === 'OGG' && codec.includes('OPUS')) return 'OPUS';
-    if (ext === 'M4A' && codec.includes('ALAC')) return 'ALAC';
-    if (container.includes('FLAC') || codec.includes('FLAC')) return 'FLAC';
-    return ext || 'UNKNOWN';
+function getLibraryIndex() {
+    if (!libraryIndexPromise) {
+        libraryIndexPromise = new LibraryIndex(app.getPath('userData')).load().catch((e) => {
+            console.warn('Library index unavailable; scanning without cache', e.message);
+            return null;
+        });
+    }
+    return libraryIndexPromise;
 }
 
-ipcMain.handle('app:scanFolder', async (_event, folderPath) => {
+ipcMain.handle('app:scanFolder', async (_event, folderPath, options) => {
     const requested = normalizeFolder(folderPath);
     if (!requested || !allowedMusicRoot || requested !== allowedMusicRoot) {
         throw new Error('Folder not permitted. Select it through the folder picker first.');
     }
+    const modelVersion = modelVersionOf(options);
 
-    let realRoot;
-    try {
-        realRoot = await fsp.realpath(requested);
-    } catch (e) {
-        throw new Error(`Music folder is not accessible: ${e.message}`);
-    }
+    return enqueueIndexJob(async () => {
+        const index = await getLibraryIndex();
+        const started = Date.now();
+        const { songs, parsed, cached, pruned } = await scanLibrary({
+            root: requested,
+            index,
+            modelVersion,
+            onProgress: (progress) => sendToRenderer('library:scanProgress', progress)
+        });
+        console.log(`Library scan: ${songs.length} tracks (${parsed} parsed, ${cached} cached, ${pruned} pruned) in ${Date.now() - started} ms`);
+        return songs;
+    });
+});
 
-    const allFiles = await getFilesRecursively(requested, realRoot);
-    // The concurrent walk yields files in arrival order; sort for a stable library.
-    const audioFiles = allFiles.filter(f => AUDIO_EXTENSIONS.has(path.extname(f).toLowerCase())).sort();
-
-    const results = [];
-    const mm = await import('music-metadata');
-
-    for (const file of audioFiles) {
-        try {
-            const metadata = await mm.parseFile(file);
-            const parentDir = path.dirname(file);
-            const albumName = path.basename(parentDir);
-            const artist = metadata.common.artist || 'Unknown Artist';
-
-            results.push({
-                path: file,
-                title: metadata.common.title || path.basename(file),
-                artist,
-                // Only the explicit tag: the renderer groups albums by it and shows
-                // 'Various Artists' for untagged compilations.
-                albumArtist: metadata.common.albumartist || '',
-                album: metadata.common.album || albumName,
-                composer: metadata.common.composer?.[0] || metadata.common.composers?.[0] || '',
-                format: detectFormat(file, metadata),
-                duration: metadata.format.duration,
-                bitrate: metadata.format.bitrate,
-                sampleRate: metadata.format.sampleRate,
-                bitsPerSample: metadata.format.bitsPerSample,
-                lossless: metadata.format.lossless,
-                picture: metadata.common.picture?.[0] ? `data:${metadata.common.picture[0].format};base64,${metadata.common.picture[0].data.toString('base64')}` : null
-            });
-        } catch (e) {
-            console.error('Error parsing', file, e);
-        }
-    }
-    return results;
+// Full tags (lyrics included) of one file under the music root; null when it is not there.
+ipcMain.handle('app:getTrackDetails', async (_event, filePath, options) => {
+    const file = await resolveLibraryFile(filePath);
+    if (!file) return null;
+    const modelVersion = modelVersionOf(options);
+    return enqueueIndexJob(async () => {
+        const index = await getLibraryIndex();
+        // Report the path the renderer knows (the un-resolved one) so it matches the library.
+        const song = await readTrackDetails({ file, index, modelVersion });
+        if (!song) return null;
+        const requested = path.resolve(filePath);
+        return requested === file ? song : { ...song, path: requested, folder: path.dirname(requested) };
+    });
 });
 
 // Window Controls

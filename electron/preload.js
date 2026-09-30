@@ -11,7 +11,8 @@ function subscribe(channel, callback, mapArgs) {
 
 contextBridge.exposeInMainWorld('electron', {
     selectFolder: () => ipcRenderer.invoke('dialog:openDirectory'),
-    scanFolder: (path) => ipcRenderer.invoke('app:scanFolder', path),
+    scanFolder: (path, options) => ipcRenderer.invoke('app:scanFolder', path, options),
+    getTrackDetails: (path, options) => ipcRenderer.invoke('app:getTrackDetails', path, options),
     getStore: (key) => ipcRenderer.invoke('store:get', key),
     setStore: (key, value) => ipcRenderer.invoke('store:set', key, value),
     minimize: () => ipcRenderer.send('window:minimize'),
