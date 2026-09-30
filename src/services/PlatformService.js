@@ -7,8 +7,9 @@ const isElectron = !!(window.electron);
 const isNative = Capacitor.isNativePlatform();
 const isAndroid = isNative && Capacitor.getPlatform() === 'android';
 
-// Native plugin implemented in android/app/src/main/java/com/crossroads/player/MediaLibraryPlugin.java
+// Native plugins implemented in android/app/src/main/java/com/crossroads/player/
 const MediaLibrary = registerPlugin('MediaLibrary');
+const MediaSession = registerPlugin('MediaSession');
 
 // Sentinel persisted as 'musicFolder' on Android: the library comes from MediaStore, not a folder.
 const MEDIASTORE_SENTINEL = 'mediastore';
@@ -34,9 +35,87 @@ async function loadMediaStoreTracks() {
     const { tracks } = await MediaLibrary.getTracks();
     return (tracks || []).map((track) => ({
         ...track,
-        picture: track.picture ? Capacitor.convertFileSrc(track.picture) : null
+        picture: track.picture ? Capacitor.convertFileSrc(track.picture) : null,
+        // Original content:// URI, for native consumers (the media-session artwork).
+        rawPicture: track.picture || null
     }));
 }
+
+// ---- Now-playing / media session -----------------------------------------------------------
+//
+// On Android this drives MediaSessionPlugin (media notification, lock-screen and headset
+// controls, foreground service). Elsewhere it uses navigator.mediaSession, which Chromium wires
+// to the OS (macOS Now Playing, Windows SMTC, Linux MPRIS, browser media hubs).
+
+const MEDIA_ACTIONS = ['play', 'pause', 'next', 'prev', 'seekto', 'stop'];
+const BROWSER_ACTION_MAP = {
+    play: 'play',
+    pause: 'pause',
+    nexttrack: 'next',
+    previoustrack: 'prev',
+    seekto: 'seekto',
+    stop: 'stop'
+};
+
+const browserMediaSession = () => (!isNative && typeof navigator !== 'undefined' && navigator.mediaSession) || null;
+
+const finiteOr = (value, fallback) => (Number.isFinite(value) && value >= 0 ? value : fallback);
+
+function updateBrowserNowPlaying({ title, artist, album, artwork, duration, position, isPlaying }) {
+    const ms = browserMediaSession();
+    if (!ms) return;
+    try {
+        if (!title) {
+            ms.metadata = null;
+            ms.playbackState = 'none';
+            return;
+        }
+        const artworkList = artwork ? [{ src: artwork }] : [];
+        const current = ms.metadata;
+        if (!current || current.title !== title || current.artist !== (artist || '') ||
+            current.album !== (album || '') || (current.artwork?.[0]?.src || '') !== (artwork || '')) {
+            ms.metadata = new MediaMetadata({ title, artist: artist || '', album: album || '', artwork: artworkList });
+        }
+        ms.playbackState = isPlaying ? 'playing' : 'paused';
+        if (typeof ms.setPositionState === 'function') {
+            const dur = finiteOr(duration, 0);
+            if (dur > 0) {
+                ms.setPositionState({
+                    duration: dur,
+                    playbackRate: 1,
+                    position: Math.min(finiteOr(position, 0), dur)
+                });
+            } else {
+                ms.setPositionState();
+            }
+        }
+    } catch (e) {
+        console.warn('mediaSession update failed', e);
+    }
+}
+
+function onBrowserMediaAction(callback) {
+    const ms = browserMediaSession();
+    if (!ms) return noop;
+    const registered = [];
+    Object.entries(BROWSER_ACTION_MAP).forEach(([browserAction, action]) => {
+        try {
+            ms.setActionHandler(browserAction, (details) => {
+                callback(action, action === 'seekto' ? details?.seekTime : undefined);
+            });
+            registered.push(browserAction);
+        } catch (e) {
+            // This browser does not support the action; ignore.
+        }
+    });
+    return () => {
+        registered.forEach((browserAction) => {
+            try { ms.setActionHandler(browserAction, null); } catch (e) { /* ignore */ }
+        });
+    };
+}
+
+let notificationPermissionRequested = false;
 
 const PlatformService = {
     isElectron: () => isElectron,
@@ -180,6 +259,68 @@ const PlatformService = {
 
     exitApp: () => {
         if (isNative) App.exitApp();
+    },
+
+    // Publishes the current track / playback state to the OS media session.
+    // { title, artist, album, artwork, duration, position, isPlaying }; duration/position in
+    // seconds. `artwork` on Android should be the raw content:// URI (song.rawPicture), on
+    // Electron the data: URL. A missing title clears the session.
+    updateNowPlaying: (state) => {
+        if (isAndroid) {
+            const { title, artist, album, artwork, duration, position, isPlaying } = state || {};
+            MediaSession.update({
+                title: title || '',
+                artist: artist || '',
+                album: album || '',
+                artwork: artwork || '',
+                duration: finiteOr(duration, 0),
+                position: finiteOr(position, 0),
+                isPlaying: !!isPlaying
+            }).catch((e) => console.error('MediaSession.update failed', e));
+            return;
+        }
+        updateBrowserNowPlaying(state || {});
+    },
+
+    clearNowPlaying: () => {
+        if (isAndroid) {
+            MediaSession.clear().catch((e) => console.error('MediaSession.clear failed', e));
+            return;
+        }
+        updateBrowserNowPlaying({});
+    },
+
+    // Asks for the notification permission that makes the Android media notification visible
+    // (Android 13+). Asked at most once per app session; playback works either way.
+    ensureNotificationPermission: () => {
+        if (!isAndroid || notificationPermissionRequested) return;
+        notificationPermissionRequested = true;
+        MediaSession.requestPermissions().catch((e) => console.warn('Notification permission request failed', e));
+    },
+
+    // callback receives (action, position): action is one of 'play' | 'pause' | 'next' | 'prev'
+    // | 'seekto' | 'stop'; position (seconds) is only set for 'seekto'.
+    onMediaAction: (callback) => {
+        if (!isAndroid) return onBrowserMediaAction(callback);
+        let handle = null;
+        let removed = false;
+        MediaSession.addListener('action', (event) => {
+            const action = event?.action;
+            if (!MEDIA_ACTIONS.includes(action)) return;
+            callback(action, action === 'seekto' ? event.position : undefined);
+        })
+            .then((h) => {
+                if (removed) h.remove();
+                else handle = h;
+            })
+            .catch((e) => console.error('MediaSession listener failed', e));
+        return () => {
+            removed = true;
+            if (handle) {
+                handle.remove();
+                handle = null;
+            }
+        };
     }
 };
 

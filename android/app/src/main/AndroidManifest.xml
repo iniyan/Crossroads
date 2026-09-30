@@ -21,6 +21,12 @@
             </intent-filter>
         </activity>
 
+        <!-- Media session + notification for the WebView player; keeps the process alive while playing. -->
+        <service
+            android:name=".MediaPlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -36,4 +42,10 @@
     <!-- Android 12 and below: legacy shared-storage read. Android 13+ uses READ_MEDIA_AUDIO instead. -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Background playback: foreground service with a media notification (POST_NOTIFICATIONS is
+         requested at runtime on Android 13+; playback works without it). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 </manifest>

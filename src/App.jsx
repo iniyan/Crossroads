@@ -13,6 +13,8 @@ import Platform from './services/PlatformService';
 const STATS_SAVE_INTERVAL = 15000;
 const MAX_PLAY_HISTORY = 10000;
 const MAX_VIEW_HISTORY = 20;
+const NOW_PLAYING_POSITION_INTERVAL = 5000; // how often the OS media session learns the position
+const SEEK_PUSH_DELAY = 250;                // trailing delay before a seek reaches the media session
 
 const persist = (key, value) =>
     Promise.resolve(Platform.setStore(key, value)).catch(e => console.error(`Failed to save ${key}`, e));
@@ -82,6 +84,8 @@ export default function App() {
     const errorStreakRef = useRef(0);
     const historyRef = useRef([]);            // previous { view, selectedPlaylistId } entries
     const latest = useRef({});                // latest handlers/state for once-registered listeners
+    const lastPositionPushRef = useRef(0);    // when the media session last got a position update
+    const seekPushTimer = useRef(null);
 
     const canMiniMode = Platform.supportsMiniMode();
 
@@ -219,10 +223,37 @@ export default function App() {
         }
     }, [isShuffle, shuffledQueue, queue, playIndex, repeatMode, playAtIndex]);
 
+    // OS media session (Android notification / lock screen, macOS Now Playing, ...)
+    const pushNowPlaying = useCallback(() => {
+        const { currentSong: song, isPlaying: playing, duration: dur } = latest.current;
+        lastPositionPushRef.current = Date.now();
+        if (!song) { Platform.clearNowPlaying(); return; }
+        const audio = audioRef.current;
+        Platform.updateNowPlaying({
+            title: song.title || 'Unknown Title',
+            artist: song.artist,
+            album: song.album,
+            // Android needs the original content:// URI, not the converted http://localhost one.
+            artwork: song.rawPicture || song.picture,
+            duration: dur || song.duration || 0,
+            position: audio.currentTime,
+            isPlaying: playing
+        });
+    }, []);
+
+    const seek = useCallback((time) => {
+        audioRef.current.currentTime = time;
+        setCurrentTime(time);
+        // Tell the OS media session promptly so its seek bar does not lag behind, but only once
+        // per burst: scrubbing the slider fires this on every step.
+        clearTimeout(seekPushTimer.current);
+        seekPushTimer.current = setTimeout(pushNowPlaying, SEEK_PUSH_DELAY);
+    }, [pushNowPlaying]);
+
     const playPrev = useCallback(() => {
         const currentQ = isShuffle ? shuffledQueue : queue;
         if (audioRef.current.currentTime > 3) {
-            audioRef.current.currentTime = 0;
+            seek(0);
             return;
         }
         if (playIndex > 0) {
@@ -233,7 +264,7 @@ export default function App() {
             setPlayIndex(currentQ.length - 1);
             playAtIndex(currentQ.length - 1, currentQ);
         }
-    }, [isShuffle, shuffledQueue, queue, playIndex, repeatMode, playAtIndex]);
+    }, [isShuffle, shuffledQueue, queue, playIndex, repeatMode, playAtIndex, seek]);
 
     const loadSongs = async () => {
         const folder = await Platform.selectFolder();
@@ -262,14 +293,28 @@ export default function App() {
         return true;
     }, []);
 
+    const currentSong = isShuffle ? shuffledQueue[playIndex] : queue[playIndex];
+
     // Keep the latest state/handlers reachable from listeners registered once
     useEffect(() => {
         latest.current = {
-            view, selectedPlaylistId, isMobile, sidebarOpen, repeatMode,
+            view, selectedPlaylistId, isMobile, sidebarOpen, repeatMode, currentSong, isPlaying, duration,
             queueLength: (isShuffle ? shuffledQueue : queue).length,
             togglePlay, playNext, playPrev, loadSongs
         };
     });
+
+    // Full media-session update on track / play state / duration change (runs after `latest`
+    // is refreshed above)
+    useEffect(() => {
+        pushNowPlaying();
+        if (isPlaying) Platform.ensureNotificationPermission();
+    }, [currentSong, isPlaying, duration, pushNowPlaying]);
+
+    useEffect(() => () => {
+        clearTimeout(seekPushTimer.current);
+        Platform.clearNowPlaying();
+    }, []);
 
     // Keyboard, global shortcuts, menu and Android back button
     useEffect(() => {
@@ -288,6 +333,18 @@ export default function App() {
                 else if (type === 'prev') latest.current.playPrev();
             }),
             Platform.onMenuScan(() => latest.current.loadSongs()),
+            Platform.onMediaAction((action, position) => {
+                const audio = audioRef.current;
+                switch (action) {
+                    case 'play': if (audio.src && audio.paused) safePlay(audio); break;
+                    case 'pause':
+                    case 'stop': audio.pause(); break;
+                    case 'next': latest.current.playNext(); break;
+                    case 'prev': latest.current.playPrev(); break;
+                    case 'seekto': if (Number.isFinite(position)) seek(position); break;
+                    default: break;
+                }
+            }),
             Platform.onBackButton(() => {
                 const { isMobile: mobile, sidebarOpen: open, view: curView } = latest.current;
                 if (mobile && open) { setSidebarOpen(false); return; }
@@ -302,19 +359,31 @@ export default function App() {
             window.removeEventListener('keydown', handleKeyDown);
             unsubs.forEach(unsubscribe);
         };
-    }, [goBack, flushStats]);
+    }, [goBack, flushStats, seek]);
 
     // Audio element events: isPlaying is derived from the element itself
     useEffect(() => {
         const audio = audioRef.current;
         const onPlay = () => setIsPlaying(true);
-        const onPause = () => setIsPlaying(false);
+        const onPause = () => {
+            // Reaching the end fires pause right before ended. When another track follows,
+            // playback never really stopped, so do not report a pause to the OS media session
+            // (on Android that would drop the foreground service, which a backgrounded app
+            // cannot get back). onEnded settles the state if nothing follows.
+            if (audio.ended) return;
+            setIsPlaying(false);
+        };
         const onPlaying = () => { errorStreakRef.current = 0; };
-        const onTimeUpdate = () => setCurrentTime(audio.currentTime);
+        const onTimeUpdate = () => {
+            setCurrentTime(audio.currentTime);
+            if (Date.now() - lastPositionPushRef.current >= NOW_PLAYING_POSITION_INTERVAL) pushNowPlaying();
+        };
         const onLoadedMetadata = () => setDuration(audio.duration);
         const onEnded = () => {
-            if (latest.current.repeatMode === 2) { audio.currentTime = 0; safePlay(audio); }
+            if (latest.current.repeatMode === 2) { seek(0); safePlay(audio); }
             else latest.current.playNext();
+            // Nothing followed (end of the queue): now it is a real pause.
+            if (audio.paused) setIsPlaying(false);
         };
         const onError = () => {
             if (!audio.src) return;
@@ -344,7 +413,7 @@ export default function App() {
             audio.removeEventListener('ended', onEnded);
             audio.removeEventListener('error', onError);
         };
-    }, []);
+    }, [pushNowPlaying, seek]);
 
     // Listening time: tick while playing, flush stats when playback stops
     useEffect(() => {
@@ -433,10 +502,8 @@ export default function App() {
         if (view !== 'lyrics') navigate('lyrics');
         else if (!goBack()) setView('library');
     };
-    const seek = (time) => { audioRef.current.currentTime = time; setCurrentTime(time); };
     const changeVolume = (vol) => { audioRef.current.volume = vol; setVolume(vol); };
 
-    const currentSong = isShuffle ? shuffledQueue[playIndex] : queue[playIndex];
     // The mini player renders nothing without a song, which would leave the user in an
     // empty frameless window: refuse to enter mini mode when there is nothing to show.
     const hasMiniContent = !!(currentSong || songs.length > 0);
