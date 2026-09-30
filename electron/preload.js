@@ -13,6 +13,13 @@ contextBridge.exposeInMainWorld('electron', {
     selectFolder: () => ipcRenderer.invoke('dialog:openDirectory'),
     scanFolder: (path, options) => ipcRenderer.invoke('app:scanFolder', path, options),
     getTrackDetails: (path, options) => ipcRenderer.invoke('app:getTrackDetails', path, options),
+    // Metadata tools (electron/metadataIpc.js)
+    writeTags: (path, ops, options) => ipcRenderer.invoke('app:writeTags', path, ops, options),
+    readSidecar: (path) => ipcRenderer.invoke('app:readSidecar', path),
+    writeSidecar: (path, content) => ipcRenderer.invoke('app:writeSidecar', path, content),
+    savePlaylistDialog: (defaultName) => ipcRenderer.invoke('dialog:savePlaylist', defaultName),
+    writePlaylist: (path, content) => ipcRenderer.invoke('app:writePlaylist', path, content),
+    openPlaylist: () => ipcRenderer.invoke('dialog:openPlaylist'),
     getStore: (key) => ipcRenderer.invoke('store:get', key),
     setStore: (key, value) => ipcRenderer.invoke('store:set', key, value),
     minimize: () => ipcRenderer.send('window:minimize'),

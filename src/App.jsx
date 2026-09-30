@@ -10,6 +10,7 @@ import { Minimize2, Minus, Square, X, Menu, Sun, Moon } from 'lucide-react';
 import './styles/global.css';
 import Platform from './services/PlatformService';
 import { appendPlay, backfillTrackKeys, setListened, ListenTimer } from './library/playHistory';
+import useMetadataTools from './hooks/useMetadataTools';
 
 const STATS_SAVE_INTERVAL = 15000;
 const MAX_VIEW_HISTORY = 20;
@@ -532,6 +533,20 @@ export default function App() {
         }
     };
 
+    // Tag editor / track info / MusicBrainz / playlist import-export (src/hooks/useMetadataTools.jsx).
+    // Songs re-read after a tag write replace their previous objects by path, everywhere.
+    const onSongsUpdated = useCallback((updated) => {
+        const byPath = new Map(updated.map(song => [song.path, song]));
+        const refresh = (list) => list.map(song => byPath.get(song.path) || song);
+        setSongs(refresh);
+        setQueue(refresh);
+        setShuffledQueue(refresh);
+    }, []);
+    const createPlaylistFromImport = useCallback((name, importedSongs) => {
+        setPlaylists(prev => [...prev, { id: `pl-${Date.now()}`, name, songs: importedSongs.map(s => s.path) }]);
+    }, []);
+    const metadataTools = useMetadataTools({ songs, onSongsUpdated, onCreatePlaylist: createPlaylistFromImport });
+
     const openPlaylist = (id) => navigate('playlist', id);
     const toggleLyrics = () => {
         if (view !== 'lyrics') navigate('lyrics');
@@ -628,6 +643,7 @@ export default function App() {
                         playlists={playlists}
                         smartPlaylists={smartPlaylists}
                         onCreatePlaylist={createPlaylist}
+                        onImportPlaylist={metadataTools.importPlaylist}
                         onOpenPlaylist={(id) => { openPlaylist(id); if (isMobile) setSidebarOpen(false); }}
                         selectedPlaylistId={selectedPlaylistId}
                     />
@@ -639,6 +655,8 @@ export default function App() {
                         <Library
                             songs={songs} onPlaySong={playSong} playlists={playlists}
                             onAddToPlaylist={addToPlaylist} favorites={favorites} onToggleFavorite={toggleFavorite}
+                            onTrackInfo={metadataTools.openTrackInfo} onEditTags={metadataTools.openTagEditor}
+                            onMusicBrainz={metadataTools.openMusicBrainz}
                         />
                     )}
                     {view === 'lyrics' && <LyricsView currentSong={currentSong} currentTime={currentTime} />}
@@ -647,6 +665,7 @@ export default function App() {
                             playlist={smartPlaylists.find(p => p.id === selectedPlaylistId) || playlists.find(p => p.id === selectedPlaylistId)}
                             allSongs={songs} stats={stats} favorites={favorites} onPlaySong={playSong}
                             onDeletePlaylist={deletePlaylist} onToggleFavorite={toggleFavorite} onAddToPlaylist={addToPlaylist}
+                            onExportPlaylist={metadataTools.exportPlaylist} onTrackInfo={metadataTools.openTrackInfo}
                         />
                     )}
                 </main>
@@ -658,9 +677,10 @@ export default function App() {
                 onToggleShuffle={toggleShuffle} repeatMode={repeatMode} onToggleRepeat={toggleRepeat}
                 isFavorite={currentSong ? favorites.includes(currentSong.path) : false}
                 onToggleFavorite={() => currentSong && toggleFavorite(currentSong.path)}
-                onToggleLyrics={toggleLyrics}
+                onToggleLyrics={toggleLyrics} onTrackInfo={() => currentSong && metadataTools.openTrackInfo(currentSong)}
                 currentView={view} onToggleMiniMode={toggleMiniMode} canMiniMode={canMiniMode}
             />
+            {metadataTools.overlay}
         </div>
     );
 }

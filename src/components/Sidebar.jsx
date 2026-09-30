@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Home, Library, Disc, Music, ListMusic, Plus, Sparkles, Check, X, Quote } from 'lucide-react';
+import { Home, Library, Disc, Music, ListMusic, Plus, Sparkles, Check, X, Quote, Upload } from 'lucide-react';
 import '../styles/Sidebar.css';
 
-const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], onCreatePlaylist, onOpenPlaylist, selectedPlaylistId }) => {
+const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], onCreatePlaylist, onImportPlaylist, onOpenPlaylist, selectedPlaylistId }) => {
     const [isCreating, setIsCreating] = useState(false);
     const [newName, setNewName] = useState('');
 
@@ -68,6 +68,11 @@ const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], o
 
                 <div className="section-title">
                     USER PLAYLISTS
+                    {onImportPlaylist && (
+                        <button className="add-pl-btn" title="Import .m3u / .m3u8 playlist" onClick={e => { e.stopPropagation(); onImportPlaylist(); }}>
+                            <Upload size={14} />
+                        </button>
+                    )}
                     <button className="add-pl-btn" title="Create Playlist" onClick={e => {
                         e.stopPropagation();
                         setIsCreating(true);

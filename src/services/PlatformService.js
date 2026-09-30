@@ -12,6 +12,7 @@ const isAndroid = isNative && Capacitor.getPlatform() === 'android';
 // Native plugins implemented in android/app/src/main/java/com/crossroads/player/
 const MediaLibrary = registerPlugin('MediaLibrary');
 const MediaSession = registerPlugin('MediaSession');
+const MediaFiles = registerPlugin('MediaFiles');   // SAF folder grants, tag writing, sidecars, playlist files
 
 // Sentinel persisted as 'musicFolder' on Android: the library comes from MediaStore, not a folder.
 const MEDIASTORE_SENTINEL = 'mediastore';
@@ -22,6 +23,14 @@ const PERMISSION_DENIED_MESSAGE =
 const noop = () => {};
 
 const ALREADY_URL = /^(https?:|data:|blob:|crossroads-media:)/i;
+
+// Electron reports a main-process throw as "Error invoking remote method 'x': Error: msg".
+const ipcError = (e) => {
+    const message = String(e?.message || e || 'Unknown error').replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
+    const error = new Error(message);
+    error.code = e?.code || null;
+    return error;
+};
 
 async function hasAudioPermission() {
     try {
@@ -258,6 +267,126 @@ const PlatformService = {
                 handle = null;
             }
         };
+    },
+
+    // ---- Metadata tools: #20 tag writing, #22 .lrc sidecars, #23 playlist files -------------
+    // Desktop: the Electron main process (electron/metadataIpc.js), restricted to the music
+    // root. Android: the MediaFiles plugin over a Storage Access Framework folder grant.
+
+    // The music folder on desktop; null on Android (MediaStore has no single root).
+    getMusicRoot: async () => {
+        if (!isElectron) return null;
+        const folder = await window.electron.getStore('musicFolder');
+        return typeof folder === 'string' && folder ? folder : null;
+    },
+
+    supportsTagWriting: () => isElectron || isAndroid,
+
+    // Android only: whether a persisted folder grant covers `path` (desktop: always true).
+    canAccessFile: async (path) => {
+        if (isElectron) return true;
+        if (!isAndroid) return false;
+        try {
+            const { granted } = await MediaFiles.canAccess({ path });
+            return !!granted;
+        } catch (e) {
+            console.error('MediaFiles.canAccess failed', e);
+            return false;
+        }
+    },
+
+    // Android only: asks the user for a folder (ACTION_OPEN_DOCUMENT_TREE). Resolves to the
+    // list of granted folders ({ uri, path }); empty when cancelled.
+    requestFolderAccess: async () => {
+        if (!isAndroid) return [];
+        try {
+            const { grants } = await MediaFiles.requestFolderAccess();
+            return grants || [];
+        } catch (e) {
+            console.error('MediaFiles.requestFolderAccess failed', e);
+            return [];
+        }
+    },
+
+    // Writes { set: {KEY: [values]}, remove: [KEY] } to a FLAC file and returns
+    // { ok, strategy, changed, song } with the re-read Song. Throws with a user-facing message;
+    // on Android the error carries code 'NEEDS_ACCESS' when no folder grant covers the file.
+    writeTags: async (path, ops) => {
+        if (isElectron) {
+            let result;
+            try {
+                result = await window.electron.writeTags(path, ops, { modelVersion: LIBRARY_MODEL_VERSION });
+            } catch (e) {
+                throw ipcError(e);
+            }
+            return { ...result, song: result?.song ? normalizeSong(result.song) : null };
+        }
+        if (isAndroid) {
+            let result;
+            try {
+                result = await MediaFiles.writeTags({ path, ops });
+            } catch (e) {
+                const error = new Error(e?.message || 'Writing tags failed');
+                error.code = e?.code || null;
+                throw error;
+            }
+            const song = result?.changed ? await PlatformService.getTrackDetails(path) : null;
+            return { ...result, song };
+        }
+        throw new Error('Tag editing is not available on this platform');
+    },
+
+    // Text of a .lrc sidecar (or null). Android needs a folder grant covering the file.
+    readSidecar: async (path) => {
+        if (!path) return null;
+        try {
+            if (isElectron) return await window.electron.readSidecar(path);
+            if (isAndroid) {
+                const { content } = await MediaFiles.readSidecar({ path });
+                return typeof content === 'string' ? content : null;
+            }
+        } catch (e) {
+            console.warn('Sidecar read failed', e);
+        }
+        return null;
+    },
+
+    writeSidecar: async (path, content) => {
+        if (isElectron) return await window.electron.writeSidecar(path, content).catch((e) => { throw ipcError(e); });
+        if (isAndroid) return await MediaFiles.writeSidecar({ path, content });
+        throw new Error('Saving lyrics is not available on this platform');
+    },
+
+    // Saves a playlist file. `buildContent({ playlistDir, musicRoot })` is called once the
+    // destination is known (desktop dialogs return the path first, so relative entries can be
+    // computed). Resolves to { ok, path?, name? } or { canceled: true }.
+    exportPlaylistFile: async ({ name, buildContent }) => {
+        if (isElectron) {
+            const target = await window.electron.savePlaylistDialog(name);
+            if (!target) return { canceled: true };
+            const slash = Math.max(target.path.lastIndexOf('/'), target.path.lastIndexOf('\\'));
+            const playlistDir = slash > 0 ? target.path.slice(0, slash) : target.path;
+            const content = buildContent({ playlistDir, musicRoot: target.musicRoot || null });
+            return await window.electron.writePlaylist(target.path, content).catch((e) => { throw ipcError(e); });
+        }
+        if (isAndroid) {
+            const content = buildContent({ playlistDir: null, musicRoot: null });
+            return await MediaFiles.savePlaylist({ name, content });
+        }
+        throw new Error('Playlist export is not available on this platform');
+    },
+
+    // Opens a playlist file: { name, content, path|null, musicRoot|null } or { canceled: true }.
+    importPlaylistFile: async () => {
+        if (isElectron) {
+            const result = await window.electron.openPlaylist().catch((e) => { throw ipcError(e); });
+            return result || { canceled: true };
+        }
+        if (isAndroid) {
+            const result = await MediaFiles.openPlaylist();
+            return result?.canceled ? { canceled: true } : { ...result, musicRoot: null };
+        }
+        throw new Error('Playlist import is not available on this platform');
     },
 
     minimize: () => {

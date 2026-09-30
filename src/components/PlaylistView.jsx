@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Play, Trash2, Sparkles, Clock, Star, Heart, Plus, Search, Check, X, Disc } from 'lucide-react';
+import { Play, Trash2, Sparkles, Clock, Star, Heart, Plus, Search, Check, X, Disc, Download, Info } from 'lucide-react';
 import { formatTime, formatTotalTime } from '../utils/format';
 import { lifetimePlayCounts } from '../utils/stats';
 import '../styles/Library.css';
 
-const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, onDeletePlaylist, onToggleFavorite, onAddToPlaylist }) => {
+const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, onDeletePlaylist, onToggleFavorite, onAddToPlaylist, onExportPlaylist, onTrackInfo }) => {
     const [isAdding, setIsAdding] = useState(false);
     const [search, setSearch] = useState('');
     const [selectedPaths, setSelectedPaths] = useState(new Set());
@@ -128,6 +128,11 @@ const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, o
                         <button className="play-all-btn" onClick={() => onPlaySong(playlistSongs[0], playlistSongs)} disabled={playlistSongs.length === 0}>
                             <Play fill="white" size={20} /> Play
                         </button>
+                        {onExportPlaylist && (
+                            <button className="icon-btn" onClick={() => onExportPlaylist(playlist, playlistSongs)} disabled={playlistSongs.length === 0} title="Export as .m3u8">
+                                <Download size={20} />
+                            </button>
+                        )}
                         {!isSmart && (
                             <>
                                 <button className="shuffle-btn-flat" onClick={() => setIsAdding(true)}>
@@ -222,6 +227,11 @@ const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, o
                                 <span className="track-artist-sub">{song.artist} • {song.album}</span>
                             </div>
                             <span className="track-dur">{formatTime(song.duration)}</span>
+                            {onTrackInfo && (
+                                <button className="context-btn icon-btn sm" onClick={(e) => { e.stopPropagation(); onTrackInfo(song); }} style={{ marginLeft: 10 }} title="Track info">
+                                    <Info size={16} />
+                                </button>
+                            )}
                         </div>
                     ))
                 )}
