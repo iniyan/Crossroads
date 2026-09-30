@@ -20,6 +20,8 @@ import { appendPlay, backfillTrackKeys, setListened, ListenTimer } from './libra
 import useMetadataTools from './hooks/useMetadataTools';
 import { DspEngine } from './audio/dsp';
 import { DSP_STORE_KEY, DEFAULT_DSP_STATE, normalizeDspState } from './audio/dspState';
+import { useQualityLibrary } from './components/quality/QualityProvider';
+import qualityStore from './analysis/qualityStore';
 
 const STATS_SAVE_INTERVAL = 15000;
 const DSP_SAVE_DELAY = 500;                 // trailing debounce for the dsp settings (sliders fire per step)
@@ -107,6 +109,10 @@ export default function App() {
     const musicFolderRef = useRef(null);      // the folder (or Android 'mediastore' sentinel) the library came from
 
     const canMiniMode = Platform.supportsMiniMode();
+
+    // Fake lossless / fake hi-res analyser (#28): library + its root for result pruning,
+    // playback for throttling.
+    useQualityLibrary(songs, isPlaying, musicFolderRef);
 
     // Mobile Detection
     useEffect(() => {
@@ -455,6 +461,7 @@ export default function App() {
             Platform.onBackButton(() => {
                 const { isMobile: mobile, sidebarOpen: open, view: curView, vinylOpen: vinyl } = latest.current;
                 if (vinyl) { setVinylOpen(false); return; }
+                if (qualityStore.getPanelSong()) { qualityStore.closePanel(); return; }
                 if (latest.current.closeMetadataOverlay?.()) return;
                 if (mobile && open) { setSidebarOpen(false); return; }
                 if (viewBackRef.current?.()) return;

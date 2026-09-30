@@ -8,6 +8,8 @@ import { albumMatchesFilter, albumQuality } from '../library/qualityGroups';
 import useViewBack from './useViewBack';
 import viewMemory from './viewMemory';
 import { trackDisplayTitle } from '../library/classical';
+import AnalysisBadge, { AlbumQualityBadge as AlbumAnalysisBadge } from './quality/QualityBadge';
+import { AnalyzeButton, QualityToolbar, useSuspiciousFilter } from './quality/QualityControls';
 import '../styles/Library.css';
 
 const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites = [], onToggleFavorite, backRef, onTrackInfo, onEditTags, onMusicBrainz }) => {
@@ -15,10 +17,13 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
     const setSelectedKey = (key) => { viewMemory.albumKey = key; setSelectedKeyState(key); };
     const [filters, updateFilters] = useQualityFilters();
     const [contextMenu, setContextMenu] = useState(null);
+    // "Suspicious files" (#28) narrows the songs before grouping; the tier chips (#31) then
+    // filter the resulting albums, so the two filters compose (AND).
+    const qualityFilter = useSuspiciousFilter(songs);
 
     const albums = useMemo(() => {
         const map = {};
-        (songs || []).forEach(song => {
+        (qualityFilter.songs || []).forEach(song => {
             const albumName = song.album || 'Unknown Album';
             // Group by the explicit album-artist tag only ('' when absent), so compilations
             // with a different artist per track stay one album instead of one card per artist.
@@ -44,7 +49,7 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
             }
             return { ...album, artist, quality: albumQuality(album.songs) };
         });
-    }, [songs]);
+    }, [qualityFilter.songs]);
 
     // Looked up by key so the open album follows library refreshes (Android finishes probing
     // files in the background and the songs are replaced).
@@ -119,6 +124,7 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                             <button className="shuffle-btn-flat" onClick={() => selectedAlbum.songs.length > 0 && onPlaySong(selectedAlbum.songs[Math.floor(Math.random() * selectedAlbum.songs.length)], selectedAlbum.songs)}>
                                 <Shuffle size={20} /> Shuffle
                             </button>
+                            <AnalyzeButton songs={selectedAlbum.songs} label={selectedAlbum.title}>Analyze album</AnalyzeButton>
                         </div>
                     </div>
                 </div>
@@ -138,6 +144,7 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                             </div>
                             <span className="track-name">{title}</span>
                             <QualityBadge quality={song.quality} compact />
+                            <AnalysisBadge song={song} />
                             <span className="track-dur">{formatTime(song.duration)}</span>
                             <button className="context-btn icon-btn sm" onClick={(e) => handleContextMenu(e, song)} style={{ marginLeft: 10 }}>
                                 <MoreVertical size={16} />
@@ -171,7 +178,10 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
     return (
         <div className="library">
             <h1>Library</h1>
-            <QualityFilters filters={filters} onChange={updateFilters} />
+            <div className="library-toolbar">
+                <QualityFilters filters={filters} onChange={updateFilters} />
+                <QualityToolbar songs={songs} filter={qualityFilter} />
+            </div>
             <div className="album-grid">
                 {visibleAlbums.map(album => (
                     <div key={album.key} className="album-card" onClick={() => setSelectedKey(album.key)}>
@@ -184,13 +194,14 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                             {album.artist}
                             {album.songs[0]?.composer && <span className="composer-sub"> | {album.songs[0].composer}</span>}
                         </div>
+                        <AlbumAnalysisBadge songs={album.songs} />
                     </div>
                 ))}
             </div>
-            {albums.length === 0 && (
+            {songs.length === 0 && (
                 <div className="empty-message">No music found. Add a folder to get started.</div>
             )}
-            {albums.length > 0 && visibleAlbums.length === 0 && (
+            {songs.length > 0 && visibleAlbums.length === 0 && (
                 <div className="empty-message">No albums match these filters.</div>
             )}
         </div>

@@ -11,6 +11,11 @@ const { registerMetadataIpc, installMusicBrainzUserAgent } = require('./metadata
 
 const store = new Store();
 
+// The quality analyser's results used to live under this settings key (one document,
+// rewritten on every change); they are in IndexedDB now and that analyzer version is
+// obsolete, so an old document is simply dropped rather than exposed to the renderer.
+if (store.has('qualityAnalysis')) store.delete('qualityAnalysis');
+
 const IS_DEV = !app.isPackaged && process.env.NODE_ENV !== 'production';
 const DEV_URL = 'http://localhost:5173';
 const MEDIA_SCHEME = 'crossroads-media';

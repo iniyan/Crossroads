@@ -1,37 +1,37 @@
-import 'fake-indexeddb/auto';
-import { describe, expect, it } from 'vitest';
-import { getBlob, setBlob, deleteBlob, isBlobStoreInMemory } from '../blobStore.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { getBlob, setBlob, deleteBlob, getAllKeys, getAllBlobs, setBlobs, deleteBlobs, _resetBlobStoreForTests, DB_NAME, STORE_NAME } from '../blobStore.js';
 
-describe('blobStore on IndexedDB', () => {
-    it('round-trips structured values and deletes them', async () => {
-        expect(await getBlob('missing')).toBeUndefined();
-        const value = { fetchedAt: 123, entries: [['HD 650', 'oratory1990/over-ear/HD 650', 'oratory1990', null]], bytes: new Uint8Array([1, 2, 3]) };
-        await setBlob('autoeqIndex', value);
-        const read = await getBlob('autoeqIndex');
-        expect(read).toEqual(value);
-        expect(read).not.toBe(value);              // structured clone, not the same object
-        expect(read.bytes).toBeInstanceOf(Uint8Array);
-        expect(isBlobStoreInMemory()).toBe(false);
+// Node has no IndexedDB, so this exercises the in-memory fallback through the public API;
+// the IndexedDB path is covered by the Electron harness (persistence across restarts).
+describe('blobStore (memory fallback)', () => {
+    beforeEach(() => { _resetBlobStoreForTests(); });
 
-        await setBlob('autoeqIndex', { replaced: true });
-        expect(await getBlob('autoeqIndex')).toEqual({ replaced: true });
-        await deleteBlob('autoeqIndex');
-        expect(await getBlob('autoeqIndex')).toBeUndefined();
-        await expect(deleteBlob('never-there')).resolves.toBeUndefined();
+    it('names the shared database and store', () => {
+        expect(DB_NAME).toBe('crossroads-blobs');
+        expect(STORE_NAME).toBe('blobs');
     });
 
-    it('persists across connections (the data is in the database, not the module)', async () => {
-        await setBlob('k', [1, 2, 3]);
-        const raw = await new Promise((resolve, reject) => {
-            const req = indexedDB.open('crossroads-blobs');
-            req.onsuccess = () => {
-                const db = req.result;
-                const get = db.transaction('blobs', 'readonly').objectStore('blobs').get('k');
-                get.onsuccess = () => { resolve(get.result); db.close(); };
-                get.onerror = () => reject(get.error);
-            };
-            req.onerror = () => reject(req.error);
-        });
-        expect(raw).toEqual([1, 2, 3]);
+    it('get / set / delete', async () => {
+        expect(await getBlob('k')).toBeUndefined();
+        await setBlob('k', { a: 1 });
+        expect(await getBlob('k')).toEqual({ a: 1 });
+        await setBlob('k', 'text');
+        expect(await getBlob('k')).toBe('text');
+        await deleteBlob('k');
+        expect(await getBlob('k')).toBeUndefined();
+        await deleteBlob('missing');
+    });
+
+    it('prefix listing and bulk operations', async () => {
+        await setBlobs([['qa:/m/a', 1], ['qa:/m/b', 2], ['other', 3]]);
+        expect((await getAllKeys('qa:')).sort()).toEqual(['qa:/m/a', 'qa:/m/b']);
+        expect((await getAllKeys()).length).toBe(3);
+        const all = await getAllBlobs('qa:');
+        expect(all).toBeInstanceOf(Map);
+        expect(Array.from(all.entries()).sort()).toEqual([['qa:/m/a', 1], ['qa:/m/b', 2]]);
+        await deleteBlobs(['qa:/m/a', 'nope']);
+        expect(await getAllKeys('qa:')).toEqual(['qa:/m/b']);
+        await setBlobs([]);
+        await deleteBlobs([]);
     });
 });

@@ -3,6 +3,7 @@ import { Play, Pause, SkipBack, SkipForward, Volume2, Repeat, Shuffle, Heart, Qu
 import { formatTime } from '../utils/format';
 import Artwork from './Artwork';
 import QualityBadge from './QualityBadge';
+import AnalysisBadge from './quality/QualityBadge';
 import { performersLine } from '../library/classical';
 import '../styles/Player.css';
 
@@ -154,7 +155,10 @@ const Player = ({
             <div className="audio-tech-info">
                 {currentSong && (
                     <>
-                        <QualityBadge quality={currentSong.quality} />
+                        <div className="tech-badge-row">
+                            <QualityBadge quality={currentSong.quality} />
+                            <AnalysisBadge song={currentSong} className="q-player-badge" />
+                        </div>
                         <div className="tech-details-nerd">
                             {currentSong.sampleRate && <span>{Math.round(currentSong.sampleRate / 100) / 10}kHz</span>}
                             {currentSong.bitrate && <span>{Math.round(currentSong.bitrate / 1000)}kbps</span>}
