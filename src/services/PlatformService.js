@@ -1,18 +1,63 @@
 import { Preferences } from '@capacitor/preferences';
 import { Device } from '@capacitor/device';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 
 const isElectron = !!(window.electron);
+const isNative = Capacitor.isNativePlatform();
+const isAndroid = isNative && Capacitor.getPlatform() === 'android';
+
+// Native plugin implemented in android/app/src/main/java/com/crossroads/player/MediaLibraryPlugin.java
+const MediaLibrary = registerPlugin('MediaLibrary');
+
+// Sentinel persisted as 'musicFolder' on Android: the library comes from MediaStore, not a folder.
+const MEDIASTORE_SENTINEL = 'mediastore';
+
+const PERMISSION_DENIED_MESSAGE =
+    'Crossroads needs permission to read your music. Please allow access to music and audio in Settings > Apps > Crossroads > Permissions.';
+
+const noop = () => {};
+
+const ALREADY_URL = /^(https?:|data:|blob:|crossroads-media:)/i;
+
+async function hasAudioPermission() {
+    try {
+        const status = await MediaLibrary.checkPermissions();
+        return status?.audio === 'granted';
+    } catch (e) {
+        console.error('MediaLibrary.checkPermissions failed', e);
+        return false;
+    }
+}
+
+async function loadMediaStoreTracks() {
+    const { tracks } = await MediaLibrary.getTracks();
+    return (tracks || []).map((track) => ({
+        ...track,
+        picture: track.picture ? Capacitor.convertFileSrc(track.picture) : null
+    }));
+}
 
 const PlatformService = {
     isElectron: () => isElectron,
 
+    supportsMiniMode: () => isElectron,
+
     convertFileSrc: (path) => {
         if (!path) return '';
-        if (path.startsWith('http') || path.startsWith('data:')) return path;
-        if (isElectron) return `file://${path}`;
-        return Capacitor.convertFileSrc(path);
+        if (ALREADY_URL.test(path)) return path;
+        if (isElectron) return `crossroads-media://track/${encodeURIComponent(path)}`;
+        if (isNative) {
+            // content:// URIs are already URI-safe; pass them through untouched.
+            if (path.startsWith('content://')) return Capacitor.convertFileSrc(path);
+            // Absolute paths are concatenated verbatim into the local-server URL, so each
+            // segment must be percent-encoded for names containing '#', '?' or '%' to
+            // survive (the server decodes them again via Uri.getPath()).
+            if (path.startsWith('/')) {
+                return Capacitor.convertFileSrc(path.split('/').map(encodeURIComponent).join('/'));
+            }
+        }
+        return path;
     },
 
     getPlatform: async () => {
@@ -48,56 +93,36 @@ const PlatformService = {
         if (isElectron) {
             return await window.electron.selectFolder();
         }
-        // Android: request storage permission and use default Music folder
-        if (Capacitor.getPlatform() === 'android') {
+        if (isAndroid) {
             try {
-                const status = await Filesystem.requestPermissions();
-                // On Android 13+, it might be 'granted' but for specific media types
-                // or 'status.publicStorage' might be the key
-                if (status.publicStorage !== 'granted' && status.storage !== 'granted') {
-                    // Check if it's already granted
-                    const check = await Filesystem.checkPermissions();
-                    if (check.publicStorage !== 'granted' && check.storage !== 'granted') {
-                        alert('Storage permission is required to access music files. Please enable it in Settings.');
-                        return null;
-                    }
-                }
+                const status = await MediaLibrary.requestPermissions();
+                if (status?.audio === 'granted') return MEDIASTORE_SENTINEL;
             } catch (e) {
-                console.error("Permission request failed", e);
+                console.error('MediaLibrary.requestPermissions failed', e);
             }
+            alert(PERMISSION_DENIED_MESSAGE);
+            return null;
         }
-        // Return the common external music directory
-        return '/storage/emulated/0/Music';
+        return null;
     },
 
+    // On Android the `path` argument is ignored (it is either the 'mediastore'
+    // sentinel or a legacy '/storage/emulated/0/Music' value): the whole music
+    // library is read from MediaStore. If permission has not been granted the
+    // scan returns [] without prompting, so a launch-time scan never nags.
     scanFolder: async (path) => {
         if (isElectron) {
             return await window.electron.scanFolder(path);
         }
-        // Android: read external storage directory for audio files
-        if (Capacitor.getPlatform() === 'android') {
+        if (isAndroid) {
             try {
-                const result = await Filesystem.readdir({
-                    path,
-                    directory: Directory.External
-                });
-
-                // Capacitor 6+ readdir results have a 'files' array of objects or strings
-                const audioFiles = result.files.filter(f => {
-                    const name = typeof f === 'string' ? f : f.name;
-                    return /\.(mp3|flac|wav|m4a)$/i.test(name);
-                });
-
-                return audioFiles.map(f => ({
-                    path: `${path}/${typeof f === 'string' ? f : f.name}`,
-                    name: typeof f === 'string' ? f : f.name
-                }));
+                if (!(await hasAudioPermission())) return [];
+                return await loadMediaStoreTracks();
             } catch (e) {
-                console.error('Failed to read music folder', e);
+                console.error('Failed to read music library', e);
                 return [];
             }
         }
-        // Fallback for other platforms
         return [];
     },
 
@@ -117,12 +142,44 @@ const PlatformService = {
         if (isElectron) window.electron.close();
     },
 
+    // callback receives (type) where type is 'playPause' | 'next' | 'prev'.
     onShortcut: (callback) => {
-        if (isElectron) window.electron.onShortcut(callback);
+        if (isElectron && typeof window.electron.onShortcut === 'function') {
+            const unsubscribe = window.electron.onShortcut(callback);
+            return typeof unsubscribe === 'function' ? unsubscribe : noop;
+        }
+        return noop;
     },
 
     onMenuScan: (callback) => {
-        if (isElectron) window.electron.onMenuScan(callback);
+        if (isElectron && typeof window.electron.onMenuScan === 'function') {
+            const unsubscribe = window.electron.onMenuScan(callback);
+            return typeof unsubscribe === 'function' ? unsubscribe : noop;
+        }
+        return noop;
+    },
+
+    onBackButton: (callback) => {
+        if (!isAndroid) return noop;
+        let handle = null;
+        let removed = false;
+        App.addListener('backButton', callback)
+            .then((h) => {
+                if (removed) h.remove();
+                else handle = h;
+            })
+            .catch((e) => console.error('backButton listener failed', e));
+        return () => {
+            removed = true;
+            if (handle) {
+                handle.remove();
+                handle = null;
+            }
+        };
+    },
+
+    exitApp: () => {
+        if (isNative) App.exitApp();
     }
 };
 

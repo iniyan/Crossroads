@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Clock, TrendingUp, Calendar, Filter } from 'lucide-react';
+import { lifetimePlayCounts } from '../utils/stats';
+import Artwork from './Artwork';
 import '../styles/Dashboard.css';
 
 const Dashboard = ({ stats, allSongs, onPlaySong }) => {
@@ -20,11 +22,16 @@ const Dashboard = ({ stats, allSongs, onPlaySong }) => {
             ? history
             : history.filter(p => (now - p.timestamp) < rangeMs);
 
-        // Calculate counts
+        // Calculate counts. Lifetime also includes plays trimmed out of playHistory;
+        // time windows can only be answered from the timestamped history.
         const counts = {};
-        filteredHistory.forEach(p => {
-            counts[p.path] = (counts[p.path] || 0) + 1;
-        });
+        if (filter === 'lifetime') {
+            Object.assign(counts, lifetimePlayCounts(stats));
+        } else {
+            filteredHistory.forEach(p => {
+                counts[p.path] = (counts[p.path] || 0) + 1;
+            });
+        }
 
         // Get Top Songs
         const topSongs = Object.entries(counts)
@@ -103,7 +110,7 @@ const Dashboard = ({ stats, allSongs, onPlaySong }) => {
                         filteredStats.topSongs.map((song, i) => (
                             <div key={song.path} className="song-row" onClick={() => onPlaySong(song)}>
                                 <span className="index">{i + 1}</span>
-                                <img src={song.picture || ''} className="list-art" alt="" />
+                                <Artwork src={song.picture} className="list-art" placeholder={<div className="list-art" />} />
                                 <div className="song-meta">
                                     <div className="title">{song.title}</div>
                                     <div className="artist">{song.artist}</div>

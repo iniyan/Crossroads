@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Maximize2, Heart, Quote, ListMusic, Music, Shuffle, Repeat } from 'lucide-react';
 import LyricsView from './LyricsView';
+import Artwork from './Artwork';
+import { formatTime } from '../utils/format';
 import '../styles/MiniPlayer.css';
 
 const MiniPlayer = ({
@@ -28,20 +30,13 @@ const MiniPlayer = ({
 
     const progress = duration ? (currentTime / duration) * 100 : 0;
 
-    const formatTime = (time) => {
-        if (!time) return '0:00';
-        const minutes = Math.floor(time / 60);
-        const seconds = Math.floor(time % 60);
-        return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-    };
-
     return (
         <div className="mini-player">
             <div className="mini-content-area">
                 {activeTab === 'nowPlaying' && (
                     <div className="mini-now-playing">
                         <div className="mini-art">
-                            {currentSong.picture ? <img src={currentSong.picture} alt="" /> : <div className="placeholder" />}
+                            <Artwork src={currentSong.picture} placeholder={<div className="placeholder" />} />
                             <div className="mini-overlay">
                                 <button className="mini-expand" onClick={onToggleMini} title="Exit Mini Mode">
                                     <Maximize2 size={16} />
@@ -71,9 +66,9 @@ const MiniPlayer = ({
                     <div className="mini-queue-container">
                         <div className="mini-queue-header">UP NEXT</div>
                         <div className="mini-queue-list">
-                            {queue.map((song, i) => (
+                            {(queue || []).map((song, i) => (
                                 <div
-                                    key={i}
+                                    key={`${song.path}-${i}`}
                                     className={`mini-queue-item ${song.path === currentSong.path ? 'active' : ''}`}
                                     onClick={() => onPlaySong(song)}
                                 >
@@ -91,7 +86,7 @@ const MiniPlayer = ({
 
             <div className="mini-persistent-controls">
                 <div className="mini-progress-section">
-                    <span className="mini-time-text">{formatTime(currentTime)}</span>
+                    <span className="mini-time-text">{formatTime(currentTime, '0:00')}</span>
                     <div className="mini-progress-bar-wrapper">
                         <input
                             type="range"
@@ -103,7 +98,7 @@ const MiniPlayer = ({
                             style={{ backgroundSize: `${progress}% 100%` }}
                         />
                     </div>
-                    <span className="mini-time-text">{formatTime(duration)}</span>
+                    <span className="mini-time-text">{formatTime(duration, '0:00')}</span>
                 </div>
 
                 <div className="mini-main-controls">

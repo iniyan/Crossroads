@@ -1,5 +1,7 @@
 import React from 'react';
 import { Play, Pause, SkipBack, SkipForward, Volume2, Repeat, Shuffle, Heart, Quote, Minimize2 } from 'lucide-react';
+import { formatTime } from '../utils/format';
+import Artwork from './Artwork';
 import '../styles/Player.css';
 
 const Player = ({
@@ -21,15 +23,9 @@ const Player = ({
     onToggleFavorite,
     onToggleLyrics,
     currentView,
-    onToggleMiniMode
+    onToggleMiniMode,
+    canMiniMode = true
 }) => {
-    const formatTime = (time) => {
-        if (!time) return '0:00';
-        const minutes = Math.floor(time / 60);
-        const seconds = Math.floor(time % 60);
-        return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-    };
-
     const progress = duration ? (currentTime / duration) * 100 : 0;
 
     return (
@@ -38,11 +34,7 @@ const Player = ({
                 {currentSong ? (
                     <>
                         <div className="track-art">
-                            {currentSong.picture ? (
-                                <img src={currentSong.picture} alt="Cover" />
-                            ) : (
-                                <div className="art-placeholder" />
-                            )}
+                            <Artwork src={currentSong.picture} alt="Cover" placeholder={<div className="art-placeholder" />} />
                         </div>
                         <div className="track-details">
                             <span className="track-title">{currentSong.title}</span>
@@ -62,7 +54,7 @@ const Player = ({
             </div>
 
             <div className="progress-container">
-                <span className="time">{formatTime(currentTime)}</span>
+                <span className="time">{formatTime(currentTime, '0:00')}</span>
                 <div className="progress-bar-wrapper">
                     <input
                         type="range"
@@ -74,7 +66,7 @@ const Player = ({
                         style={{ backgroundSize: `${progress}% 100%` }}
                     />
                 </div>
-                <span className="time">{formatTime(duration)}</span>
+                <span className="time">{formatTime(duration, '0:00')}</span>
             </div>
 
             <div className="controls-center">
@@ -123,14 +115,16 @@ const Player = ({
                         <Quote size={18} />
                     </button>
 
-                    <button
-                        className="icon-btn sm"
-                        onClick={onToggleMiniMode}
-                        disabled={!currentSong}
-                        title="Mini Player (Apple Music Style)"
-                    >
-                        <Minimize2 size={18} />
-                    </button>
+                    {canMiniMode && (
+                        <button
+                            className="icon-btn sm"
+                            onClick={onToggleMiniMode}
+                            disabled={!currentSong}
+                            title="Mini Player (Apple Music Style)"
+                        >
+                            <Minimize2 size={18} />
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -138,13 +132,14 @@ const Player = ({
                 {currentSong && (
                     <>
                         <div className="tech-badge">
-                            {currentSong.lossless ? <span className="lossless-badge">LOSSLESS</span> : <span>COMPRESSED</span>}
+                            {currentSong.lossless === true && <span className="lossless-badge">LOSSLESS</span>}
+                            {currentSong.lossless === false && <span>COMPRESSED</span>}
                             {currentSong.bitsPerSample && <span>{currentSong.bitsPerSample}-bit</span>}
                         </div>
                         <div className="tech-details-nerd">
                             {currentSong.sampleRate && <span>{Math.round(currentSong.sampleRate / 100) / 10}kHz</span>}
                             {currentSong.bitrate && <span>{Math.round(currentSong.bitrate / 1000)}kbps</span>}
-                            <span className="format-tag">FLAC</span>
+                            {currentSong.format && <span className="format-tag">{currentSong.format}</span>}
                         </div>
                     </>
                 )}
