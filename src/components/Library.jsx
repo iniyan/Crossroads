@@ -2,15 +2,18 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Play, MoreVertical, Shuffle, Heart } from 'lucide-react';
 import { formatTime, formatTotalTime } from '../utils/format';
 import Artwork from './Artwork';
+import QualityBadge, { AlbumQualityBadge } from './quality/QualityBadge';
+import { AnalyzeButton, QualityToolbar, useSuspiciousFilter } from './quality/QualityControls';
 import '../styles/Library.css';
 
 const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites = [], onToggleFavorite }) => {
     const [selectedAlbum, setSelectedAlbum] = useState(null);
     const [contextMenu, setContextMenu] = useState(null);
+    const qualityFilter = useSuspiciousFilter(songs); // "Suspicious files" (#28)
 
     const albums = useMemo(() => {
         const map = {};
-        (songs || []).forEach(song => {
+        (qualityFilter.songs || []).forEach(song => {
             const albumName = song.album || 'Unknown Album';
             // Group by the explicit album-artist tag only ('' when absent), so compilations
             // with a different artist per track stay one album instead of one card per artist.
@@ -36,7 +39,7 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
             }
             return { ...album, artist };
         });
-    }, [songs]);
+    }, [qualityFilter.songs]);
 
     const handleContextMenu = (e, song) => {
         e.preventDefault();
@@ -89,6 +92,7 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                             <button className="shuffle-btn-flat" onClick={() => selectedAlbum.songs.length > 0 && onPlaySong(selectedAlbum.songs[Math.floor(Math.random() * selectedAlbum.songs.length)], selectedAlbum.songs)}>
                                 <Shuffle size={20} /> Shuffle
                             </button>
+                            <AnalyzeButton songs={selectedAlbum.songs} label={selectedAlbum.title}>Analyze album</AnalyzeButton>
                         </div>
                     </div>
                 </div>
@@ -107,6 +111,7 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                                 <Heart size={14} fill={favorites.includes(song.path) ? "var(--accent-color)" : "none"} color={favorites.includes(song.path) ? "var(--accent-color)" : "var(--text-secondary)"} />
                             </div>
                             <span className="track-name">{song.title}</span>
+                            <QualityBadge song={song} />
                             <span className="track-dur">{formatTime(song.duration)}</span>
                             <button className="context-btn icon-btn sm" onClick={(e) => handleContextMenu(e, song)} style={{ marginLeft: 10 }}>
                                 <MoreVertical size={16} />
@@ -136,6 +141,7 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
     return (
         <div className="library">
             <h1>Library</h1>
+            <QualityToolbar songs={songs} filter={qualityFilter} />
             <div className="album-grid">
                 {albums.map(album => (
                     <div key={album.key} className="album-card" onClick={() => setSelectedAlbum(album)}>
@@ -147,6 +153,7 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                             {album.artist}
                             {album.songs[0]?.composer && <span className="composer-sub"> | {album.songs[0].composer}</span>}
                         </div>
+                        <AlbumQualityBadge songs={album.songs} />
                     </div>
                 ))}
             </div>
