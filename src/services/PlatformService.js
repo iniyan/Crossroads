@@ -2,6 +2,8 @@ import { Preferences } from '@capacitor/preferences';
 import { Device } from '@capacitor/device';
 import { App } from '@capacitor/app';
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { normalizeSong, normalizeSongs } from '../library/normalize';
+import { LIBRARY_MODEL_VERSION } from '../library/song';
 
 const isElectron = !!(window.electron);
 const isNative = Capacitor.isNativePlatform();
@@ -31,14 +33,23 @@ async function hasAudioPermission() {
     }
 }
 
+// MediaStore rows come back at once; files whose probe did not fit in `budgetMs` are marked
+// provisional and finished on a background thread (see onLibraryIndexed).
+const MEDIASTORE_FIRST_PASS_BUDGET_MS = 1500;
+
+const withPictureUrls = (track) => ({
+    ...track,
+    picture: track.picture ? Capacitor.convertFileSrc(track.picture) : null,
+    // Original content:// URI, for native consumers (the media-session artwork).
+    rawPicture: track.picture || null
+});
+
 async function loadMediaStoreTracks() {
-    const { tracks } = await MediaLibrary.getTracks();
-    return (tracks || []).map((track) => ({
-        ...track,
-        picture: track.picture ? Capacitor.convertFileSrc(track.picture) : null,
-        // Original content:// URI, for native consumers (the media-session artwork).
-        rawPicture: track.picture || null
-    }));
+    const { tracks } = await MediaLibrary.getTracks({
+        budgetMs: MEDIASTORE_FIRST_PASS_BUDGET_MS,
+        modelVersion: LIBRARY_MODEL_VERSION
+    });
+    return (tracks || []).map(withPictureUrls);
 }
 
 // ---- Now-playing / media session -----------------------------------------------------------
@@ -189,20 +200,64 @@ const PlatformService = {
     // sentinel or a legacy '/storage/emulated/0/Music' value): the whole music
     // library is read from MediaStore. If permission has not been granted the
     // scan returns [] without prompting, so a launch-time scan never nags.
+    // Results are normalised into the full Song model (src/library/song.js).
     scanFolder: async (path) => {
         if (isElectron) {
-            return await window.electron.scanFolder(path);
+            return normalizeSongs(await window.electron.scanFolder(path, { modelVersion: LIBRARY_MODEL_VERSION }));
         }
         if (isAndroid) {
             try {
                 if (!(await hasAudioPermission())) return [];
-                return await loadMediaStoreTracks();
+                return normalizeSongs(await loadMediaStoreTracks());
             } catch (e) {
                 console.error('Failed to read music library', e);
                 return [];
             }
         }
         return [];
+    },
+
+    // The full Song for one file (every tag including lyrics text, which scanFolder leaves
+    // out of the bulk payload). null when the platform cannot provide it. `path` must belong
+    // to the scanned library.
+    getTrackDetails: async (path) => {
+        if (!path) return null;
+        try {
+            if (isElectron) {
+                const raw = await window.electron.getTrackDetails(path, { modelVersion: LIBRARY_MODEL_VERSION });
+                return raw ? normalizeSong(raw) : null;
+            }
+            if (isAndroid) {
+                if (!(await hasAudioPermission())) return null;
+                const { track } = await MediaLibrary.getTrackDetails({ path, modelVersion: LIBRARY_MODEL_VERSION });
+                return track ? normalizeSong(withPictureUrls(track)) : null;
+            }
+        } catch (e) {
+            console.error('Failed to read track details', e);
+        }
+        return null;
+    },
+
+    // Android keeps indexing files that did not fit in the scan's time budget after
+    // getTracks() returns; the callback fires when that background pass has finished
+    // and a rescan would pick up the newly parsed metadata. Returns an unsubscribe.
+    onLibraryIndexed: (callback) => {
+        if (!isAndroid || typeof callback !== 'function') return noop;
+        let handle = null;
+        let removed = false;
+        MediaLibrary.addListener('libraryIndexed', callback)
+            .then((h) => {
+                if (removed) h.remove();
+                else handle = h;
+            })
+            .catch((e) => console.error('libraryIndexed listener failed', e));
+        return () => {
+            removed = true;
+            if (handle) {
+                handle.remove();
+                handle = null;
+            }
+        };
     },
 
     minimize: () => {

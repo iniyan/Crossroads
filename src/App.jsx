@@ -9,32 +9,15 @@ import LyricsView from './components/LyricsView';
 import { Minimize2, Minus, Square, X, Menu, Sun, Moon } from 'lucide-react';
 import './styles/global.css';
 import Platform from './services/PlatformService';
+import { appendPlay, backfillTrackKeys, setListened, ListenTimer } from './library/playHistory';
 
 const STATS_SAVE_INTERVAL = 15000;
-const MAX_PLAY_HISTORY = 10000;
 const MAX_VIEW_HISTORY = 20;
 const NOW_PLAYING_POSITION_INTERVAL = 5000; // how often the OS media session learns the position
 const SEEK_PUSH_DELAY = 250;                // trailing delay before a seek reaches the media session
 
 const persist = (key, value) =>
     Promise.resolve(Platform.setStore(key, value)).catch(e => console.error(`Failed to save ${key}`, e));
-
-// Appends a play to the stats. When the timestamped history outgrows MAX_PLAY_HISTORY the
-// oldest entries are folded into `archivedCounts` / `archivedCount`, so lifetime totals
-// survive the trim (only the time-windowed views lose those plays).
-const recordPlay = (prev, songPath) => {
-    const playHistory = [...(prev.playHistory || []), { path: songPath, timestamp: Date.now() }];
-    if (playHistory.length <= MAX_PLAY_HISTORY) return { ...prev, playHistory };
-    const dropped = playHistory.splice(0, playHistory.length - MAX_PLAY_HISTORY);
-    const archivedCounts = { ...(prev.archivedCounts || {}) };
-    dropped.forEach(play => { archivedCounts[play.path] = (archivedCounts[play.path] || 0) + 1; });
-    return {
-        ...prev,
-        playHistory,
-        archivedCounts,
-        archivedCount: (prev.archivedCount || 0) + dropped.length
-    };
-};
 
 const safePlay = (audio) => {
     const p = audio.play();
@@ -86,6 +69,9 @@ export default function App() {
     const latest = useRef({});                // latest handlers/state for once-registered listeners
     const lastPositionPushRef = useRef(0);    // when the media session last got a position update
     const seekPushTimer = useRef(null);
+    const listenTimerRef = useRef(new ListenTimer());   // seconds the current play has actually played
+    const currentPlayRef = useRef(null);      // { path, timestamp } of the play-history entry being timed
+    const musicFolderRef = useRef(null);      // the folder (or Android 'mediastore' sentinel) the library came from
 
     const canMiniMode = Platform.supportsMiniMode();
 
@@ -100,10 +86,23 @@ export default function App() {
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
-    const scanAndSetSongs = async (folder) => {
+    // `rescan` re-reads a library already on screen (Android finished probing in the
+    // background): the queue keeps its order and position, only the song objects are
+    // refreshed by path, and the current view is left alone.
+    const scanAndSetSongs = async (folder, { rescan = false } = {}) => {
         try {
             const scannedSongs = (await Platform.scanFolder(folder)) || [];
             setSongs(scannedSongs);
+            // Plays recorded while a song was provisional carry no trackKey yet; fill them in
+            // now that the library may hold the final keys.
+            setStats(prev => backfillTrackKeys(prev, scannedSongs));
+            if (rescan) {
+                const byPath = new Map(scannedSongs.map(song => [song.path, song]));
+                const refresh = (list) => list.map(song => byPath.get(song.path) || song);
+                setQueue(refresh);
+                setShuffledQueue(refresh);
+                return;
+            }
             if (scannedSongs.length > 0) setView(v => v === 'dashboard' ? 'library' : v);
         } catch (e) {
             console.error('Failed to scan music folder', e);
@@ -133,7 +132,10 @@ export default function App() {
             if (savedPlaylists) setPlaylists(savedPlaylists);
             if (savedFavs) setFavorites(savedFavs);
             if (savedTheme) setTheme(savedTheme);
-            if (savedFolder) scanAndSetSongs(savedFolder);
+            if (savedFolder) {
+                musicFolderRef.current = savedFolder;
+                scanAndSetSongs(savedFolder);
+            }
         }
         loadData();
         return () => { cancelled = true; };
@@ -158,6 +160,22 @@ export default function App() {
         persist('stats', statsRef.current);
     }, []);
 
+    // Writes the seconds played so far onto the current play-history entry (cheap: no-op
+    // when the value has not changed). Applied to statsRef synchronously as well as to the
+    // React state, so a flushStats() in the same tick (pagehide, visibility hidden, back
+    // button) persists the value instead of the stats from the last render.
+    const commitListened = useCallback(() => {
+        const entry = currentPlayRef.current;
+        if (!entry) return;
+        const listened = listenTimerRef.current.seconds();
+        const next = setListened(statsRef.current, entry, listened);
+        if (next !== statsRef.current) {
+            statsRef.current = next;
+            statsDirtyRef.current = true;
+        }
+        setStats(prev => setListened(prev, entry, listened));
+    }, []);
+
     useEffect(() => {
         statsRef.current = stats;
         if (!isLoaded('stats')) return;
@@ -169,15 +187,16 @@ export default function App() {
     }, [stats, flushStats]);
 
     useEffect(() => {
-        const onVisibility = () => { if (document.visibilityState === 'hidden') flushStats(); };
+        const onVisibility = () => { if (document.visibilityState === 'hidden') { commitListened(); flushStats(); } };
+        const onPageHide = () => { commitListened(); flushStats(); };
         document.addEventListener('visibilitychange', onVisibility);
-        window.addEventListener('pagehide', flushStats);
+        window.addEventListener('pagehide', onPageHide);
         return () => {
             document.removeEventListener('visibilitychange', onVisibility);
-            window.removeEventListener('pagehide', flushStats);
+            window.removeEventListener('pagehide', onPageHide);
             flushStats();
         };
-    }, [flushStats]);
+    }, [flushStats, commitListened]);
 
     const generateShuffledQueue = (originalQueue, currentSongPath) => {
         let newQueue = [...originalQueue];
@@ -197,10 +216,14 @@ export default function App() {
         const song = currentQueue[index];
         if (!song) return;
         const audio = audioRef.current;
+        commitListened();
+        listenTimerRef.current.reset();
+        const timestamp = Date.now();
+        currentPlayRef.current = { path: song.path, timestamp };
         audio.src = Platform.convertFileSrc(song.path);
         safePlay(audio);
-        setStats(prev => recordPlay(prev, song.path));
-    }, []);
+        setStats(prev => appendPlay(prev, song, timestamp).stats);
+    }, [commitListened]);
 
     const togglePlay = useCallback(() => {
         const audio = audioRef.current;
@@ -269,9 +292,16 @@ export default function App() {
     const loadSongs = async () => {
         const folder = await Platform.selectFolder();
         if (folder) {
+            musicFolderRef.current = folder;
             persist('musicFolder', folder);
             scanAndSetSongs(folder);
         }
+    };
+
+    // Android has finished probing the files that did not fit in the first pass: re-read the
+    // library so the provisional rows get their tags, audio properties and quality.
+    const onLibraryIndexed = () => {
+        if (musicFolderRef.current) scanAndSetSongs(musicFolderRef.current, { rescan: true });
     };
 
     // Navigation with a small history stack (used by the Android back button)
@@ -300,7 +330,7 @@ export default function App() {
         latest.current = {
             view, selectedPlaylistId, isMobile, sidebarOpen, repeatMode, currentSong, isPlaying, duration,
             queueLength: (isShuffle ? shuffledQueue : queue).length,
-            togglePlay, playNext, playPrev, loadSongs
+            togglePlay, playNext, playPrev, loadSongs, onLibraryIndexed
         };
     });
 
@@ -333,6 +363,7 @@ export default function App() {
                 else if (type === 'prev') latest.current.playPrev();
             }),
             Platform.onMenuScan(() => latest.current.loadSongs()),
+            Platform.onLibraryIndexed(() => latest.current.onLibraryIndexed()),
             Platform.onMediaAction((action, position) => {
                 const audio = audioRef.current;
                 switch (action) {
@@ -364,13 +395,15 @@ export default function App() {
     // Audio element events: isPlaying is derived from the element itself
     useEffect(() => {
         const audio = audioRef.current;
-        const onPlay = () => setIsPlaying(true);
+        const onPlay = () => { listenTimerRef.current.start(); setIsPlaying(true); };
         const onPause = () => {
             // Reaching the end fires pause right before ended. When another track follows,
             // playback never really stopped, so do not report a pause to the OS media session
             // (on Android that would drop the foreground service, which a backgrounded app
-            // cannot get back). onEnded settles the state if nothing follows.
+            // cannot get back). onEnded settles the state and the listened time.
             if (audio.ended) return;
+            listenTimerRef.current.stop();
+            commitListened();
             setIsPlaying(false);
         };
         const onPlaying = () => { errorStreakRef.current = 0; };
@@ -380,6 +413,8 @@ export default function App() {
         };
         const onLoadedMetadata = () => setDuration(audio.duration);
         const onEnded = () => {
+            listenTimerRef.current.stop();
+            commitListened();
             if (latest.current.repeatMode === 2) { seek(0); safePlay(audio); }
             else latest.current.playNext();
             // Nothing followed (end of the queue): now it is a real pause.
@@ -413,7 +448,7 @@ export default function App() {
             audio.removeEventListener('ended', onEnded);
             audio.removeEventListener('error', onError);
         };
-    }, [pushNowPlaying, seek]);
+    }, [pushNowPlaying, seek, commitListened]);
 
     // Listening time: tick while playing, flush stats when playback stops
     useEffect(() => {
