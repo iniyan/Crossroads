@@ -8,6 +8,9 @@ import MiniPlayer from './components/MiniPlayer';
 import LyricsView from './components/LyricsView';
 import FoldersView from './components/FoldersView';
 import ClassicalView from './components/ClassicalView';
+import EqualizerView from './components/EqualizerView';
+import WrappedView from './components/WrappedView';
+import VinylView from './components/VinylView';
 import { Minimize2, Minus, Square, X, Menu, Sun, Moon } from 'lucide-react';
 import './styles/global.css';
 import Platform from './services/PlatformService';
@@ -15,8 +18,11 @@ import { hasClassicalMusic } from './library/classical';
 import { shuffled } from './utils/list';
 import { appendPlay, backfillTrackKeys, setListened, ListenTimer } from './library/playHistory';
 import useMetadataTools from './hooks/useMetadataTools';
+import { DspEngine } from './audio/dsp';
+import { DSP_STORE_KEY, DEFAULT_DSP_STATE, normalizeDspState } from './audio/dspState';
 
 const STATS_SAVE_INTERVAL = 15000;
+const DSP_SAVE_DELAY = 500;                 // trailing debounce for the dsp settings (sliders fire per step)
 const MAX_VIEW_HISTORY = 20;
 const NOW_PLAYING_POSITION_INTERVAL = 5000; // how often the OS media session learns the position
 const SEEK_PUSH_DELAY = 250;                // trailing delay before a seek reaches the media session
@@ -30,6 +36,13 @@ const safePlay = (audio) => {
 };
 
 const unsubscribe = (unsub) => { if (typeof unsub === 'function') unsub(); };
+
+// Exposes the DSP engine as window.__crossroadsDsp for the Electron harness / dev tools:
+// in Vite dev builds, or when localStorage 'crossroads:debug' is '1' (a harness flag).
+const dspDebugHook = () => {
+    if (import.meta.env.DEV) return true;
+    try { return localStorage.getItem('crossroads:debug') === '1'; } catch { return false; }
+};
 
 export default function App() {
     const [songs, setSongs] = useState([]);
@@ -57,9 +70,20 @@ export default function App() {
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
     const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768);
     const [theme, setTheme] = useState('dark');
+    const [dsp, setDsp] = useState(DEFAULT_DSP_STATE);   // EQ / crossfeed settings (#24)
+    const [dspActive, setDspActive] = useState(false);   // processing graph in the signal path
+    const [vinylOpen, setVinylOpen] = useState(false);   // full-screen now-playing overlay (#26)
 
     const audioRef = useRef(null);
-    if (!audioRef.current) audioRef.current = new Audio();
+    if (!audioRef.current) {
+        audioRef.current = new Audio();
+        // CORS mode before the first src: Web Audio (EQ) reads samples only from CORS-enabled
+        // media. Same-origin on Android (Capacitor server); the Electron media scheme answers
+        // with Access-Control-Allow-Origin for the app origin.
+        audioRef.current.crossOrigin = 'anonymous';
+    }
+    const dspRef = useRef(null);
+    if (!dspRef.current) dspRef.current = new DspEngine(audioRef.current);
 
     // Store keys whose saved value was read successfully. A key is only ever persisted once it
     // is in here, so defaults never overwrite saved data (nor data we failed to read).
@@ -69,6 +93,9 @@ export default function App() {
     const statsDirtyRef = useRef(false);
     const lastStatsSaveRef = useRef(0);
     const statsSaveTimer = useRef(null);
+    const dspStateRef = useRef(dsp);
+    const dspDirtyRef = useRef(false);
+    const dspSaveTimer = useRef(null);
     const errorStreakRef = useRef(0);
     const historyRef = useRef([]);            // previous { view, selectedPlaylistId } entries
     const latest = useRef({});                // latest handlers/state for once-registered listeners
@@ -130,14 +157,15 @@ export default function App() {
             }
         };
         async function loadData() {
-            const [savedStats, savedPlaylists, savedFavs, savedTheme, savedFolder] = await Promise.all(
-                ['stats', 'playlists', 'favorites', 'theme', 'musicFolder'].map(read)
+            const [savedStats, savedPlaylists, savedFavs, savedTheme, savedFolder, savedDsp] = await Promise.all(
+                ['stats', 'playlists', 'favorites', 'theme', 'musicFolder', DSP_STORE_KEY].map(read)
             );
             if (cancelled) return;
             if (savedStats) setStats(savedStats);
             if (savedPlaylists) setPlaylists(savedPlaylists);
             if (savedFavs) setFavorites(savedFavs);
             if (savedTheme) setTheme(savedTheme);
+            if (savedDsp) setDsp(normalizeDspState(savedDsp));
             if (savedFolder) {
                 musicFolderRef.current = savedFolder;
                 scanAndSetSongs(savedFolder);
@@ -156,6 +184,34 @@ export default function App() {
     // persistence (skipped until the key's saved value has been read, see loadedKeysRef)
     useEffect(() => { if (isLoaded('playlists')) persist('playlists', playlists); }, [playlists]);
     useEffect(() => { if (isLoaded('favorites')) persist('favorites', favorites); }, [favorites]);
+
+    // DSP: every change goes into the Web Audio graph at once (created lazily by the engine
+    // the first time processing is wanted; see src/audio/dsp.js for the routing rules) and is
+    // persisted after a DSP_SAVE_DELAY lull, flushed on pause/hide like the stats.
+    const flushDsp = useCallback(() => {
+        clearTimeout(dspSaveTimer.current);
+        if (!loadedKeysRef.current.has(DSP_STORE_KEY) || !dspDirtyRef.current) return;
+        dspDirtyRef.current = false;
+        persist(DSP_STORE_KEY, dspStateRef.current);
+    }, []);
+    useEffect(() => {
+        dspRef.current.apply(dsp);
+        dspStateRef.current = dsp;
+        if (!isLoaded(DSP_STORE_KEY)) return;
+        dspDirtyRef.current = true;
+        clearTimeout(dspSaveTimer.current);
+        dspSaveTimer.current = setTimeout(flushDsp, DSP_SAVE_DELAY);
+    }, [dsp, flushDsp]);
+    useEffect(() => {
+        const engine = dspRef.current;
+        const sync = () => setDspActive(engine.active);
+        sync();
+        const unsub = engine.subscribe(sync);
+        // Diagnostics hook (Electron harness): window.__crossroadsDsp.measure() -> { peak, rms, wiring }
+        const debug = dspDebugHook();
+        if (debug) window.__crossroadsDsp = engine;
+        return () => { unsub(); if (debug) delete window.__crossroadsDsp; };
+    }, []);
 
     // Stats persistence: throttled to once per STATS_SAVE_INTERVAL, flushed on pause/hide
     const flushStats = useCallback(() => {
@@ -193,16 +249,17 @@ export default function App() {
     }, [stats, flushStats]);
 
     useEffect(() => {
-        const onVisibility = () => { if (document.visibilityState === 'hidden') { commitListened(); flushStats(); } };
-        const onPageHide = () => { commitListened(); flushStats(); };
+        const onVisibility = () => { if (document.visibilityState === 'hidden') { commitListened(); flushStats(); flushDsp(); } };
+        const onPageHide = () => { commitListened(); flushStats(); flushDsp(); };
         document.addEventListener('visibilitychange', onVisibility);
         window.addEventListener('pagehide', onPageHide);
         return () => {
             document.removeEventListener('visibilitychange', onVisibility);
             window.removeEventListener('pagehide', onPageHide);
             flushStats();
+            flushDsp();
         };
-    }, [flushStats, commitListened]);
+    }, [flushStats, flushDsp, commitListened]);
 
     const generateShuffledQueue = (originalQueue, currentSongPath) => {
         let newQueue = shuffled(originalQueue);
@@ -346,7 +403,7 @@ export default function App() {
     // Keep the latest state/handlers reachable from listeners registered once
     useEffect(() => {
         latest.current = {
-            view, selectedPlaylistId, isMobile, sidebarOpen, repeatMode, currentSong, isPlaying, duration,
+            view, selectedPlaylistId, isMobile, sidebarOpen, repeatMode, currentSong, isPlaying, duration, vinylOpen,
             queueLength: (isShuffle ? shuffledQueue : queue).length,
             togglePlay, playNext, playPrev, loadSongs, onLibraryIndexed,
             closeMetadataOverlay: metadataTools.closeOverlay
@@ -368,7 +425,7 @@ export default function App() {
     // Keyboard, global shortcuts, menu and Android back button
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
             if (e.code === 'Space') { e.preventDefault(); latest.current.togglePlay(); }
             else if (e.code === 'ArrowRight') latest.current.playNext();
             else if (e.code === 'ArrowLeft') latest.current.playPrev();
@@ -396,7 +453,8 @@ export default function App() {
                 }
             }),
             Platform.onBackButton(() => {
-                const { isMobile: mobile, sidebarOpen: open, view: curView } = latest.current;
+                const { isMobile: mobile, sidebarOpen: open, view: curView, vinylOpen: vinyl } = latest.current;
+                if (vinyl) { setVinylOpen(false); return; }
                 if (latest.current.closeMetadataOverlay?.()) return;
                 if (mobile && open) { setSidebarOpen(false); return; }
                 if (viewBackRef.current?.()) return;
@@ -681,6 +739,8 @@ export default function App() {
                         />
                     )}
                     {view === 'lyrics' && <LyricsView currentSong={currentSong} currentTime={currentTime} />}
+                    {view === 'equalizer' && <EqualizerView dsp={dsp} onChange={setDsp} engine={dspRef.current} />}
+                    {view === 'wrapped' && <WrappedView stats={stats} songs={songs} onPlaySong={playSong} />}
                     {view === 'playlist' && (
                         <PlaylistView
                             playlist={smartPlaylists.find(p => p.id === selectedPlaylistId) || playlists.find(p => p.id === selectedPlaylistId)}
@@ -700,8 +760,17 @@ export default function App() {
                 onToggleFavorite={() => currentSong && toggleFavorite(currentSong.path)}
                 onToggleLyrics={toggleLyrics} onTrackInfo={() => currentSong && metadataTools.openTrackInfo(currentSong)}
                 currentView={view} onToggleMiniMode={toggleMiniMode} canMiniMode={canMiniMode}
+                onOpenVinyl={() => { if (currentSong) setVinylOpen(true); }} dspActive={dspActive}
             />
             {metadataTools.overlay}
+            {vinylOpen && currentSong && (
+                <VinylView
+                    currentSong={currentSong} isPlaying={isPlaying} currentTime={currentTime} duration={duration}
+                    onPlayPause={togglePlay} onNext={playNext} onPrev={playPrev} onSeek={seek}
+                    onClose={() => setVinylOpen(false)} dspActive={dspActive}
+                    isFavorite={favorites.includes(currentSong.path)} onToggleFavorite={() => toggleFavorite(currentSong.path)}
+                />
+            )}
         </div>
     );
 }

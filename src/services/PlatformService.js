@@ -13,6 +13,7 @@ const isAndroid = isNative && Capacitor.getPlatform() === 'android';
 const MediaLibrary = registerPlugin('MediaLibrary');
 const MediaSession = registerPlugin('MediaSession');
 const MediaFiles = registerPlugin('MediaFiles');   // SAF folder grants, tag writing, sidecars, playlist files
+const ImageExport = registerPlugin('ImageExport');
 
 // Sentinel persisted as 'musicFolder' on Android: the library comes from MediaStore, not a folder.
 const MEDIASTORE_SENTINEL = 'mediastore';
@@ -443,6 +444,50 @@ const PlatformService = {
 
     exitApp: () => {
         if (isNative) App.exitApp();
+    },
+
+    // Exports a PNG rendered in the renderer (Crossroads Wrapped slides, #27). `base64` is the
+    // PNG without the data: prefix; `blob` the same bytes when available.
+    //   Electron: native save dialog (main process validates the PNG bytes and the .png name).
+    //   Android: the WebView has no Web Share API, so ImageExportPlugin writes the file to the
+    //            app cache and opens the system share sheet via FileProvider (its targets include
+    //            Photos / Files, so "save" is covered without a storage permission). The call
+    //            resolves when the chooser opens, so the outcome is unknown: it is reported as
+    //            "shared", never as saved.
+    //   Browser: Web Share with files when available (same caveat), else a download link.
+    // Resolves { saved, shared, message }: `saved` only when a file is known to exist on disk,
+    // `shared` when a share sheet was opened; `message` (may be null) is shown to the user.
+    exportImage: async ({ base64, filename, blob }) => {
+        const name = filename || 'crossroads-wrapped.png';
+        if (isElectron) {
+            const result = await window.electron.saveImage(name, base64);
+            if (result?.saved) return { saved: true, shared: false, message: `Saved to ${result.path}` };
+            return { saved: false, shared: false, message: result?.canceled ? null : (result?.message || 'Not saved') };
+        }
+        if (isAndroid) {
+            const result = await ImageExport.share({ base64, filename: name });
+            const shared = !!result?.shared;
+            return { saved: false, shared, message: shared ? 'Opened the share sheet.' : 'Could not open the share sheet.' };
+        }
+        const file = blob && typeof File === 'function' ? new File([blob], name, { type: 'image/png' }) : null;
+        if (file && typeof navigator !== 'undefined' && navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+            try {
+                await navigator.share({ files: [file], title: 'Crossroads Wrapped' });
+                return { saved: false, shared: true, message: 'Shared.' };
+            } catch (e) {
+                if (e && e.name === 'AbortError') return { saved: false, shared: false, message: null };
+            }
+        }
+        const bytes = blob || new Blob([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], { type: 'image/png' });
+        const url = URL.createObjectURL(bytes);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = name;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        return { saved: true, shared: false, message: `Downloaded ${name}` };
     },
 
     // Publishes the current track / playback state to the OS media session.

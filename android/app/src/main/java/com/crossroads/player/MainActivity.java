@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(MediaLibraryPlugin.class);
         registerPlugin(MediaSessionPlugin.class);
         registerPlugin(MediaFilesPlugin.class);
+        registerPlugin(ImageExportPlugin.class);
         super.onCreate(savedInstanceState);
         // Capacitor's local server mishandles Range requests (206 but streamed from byte 0),
         // which breaks seeking in the audio element; serve ranges for local files ourselves.

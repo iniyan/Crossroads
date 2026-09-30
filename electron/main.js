@@ -30,7 +30,8 @@ const CONTENT_SECURITY_POLICY = [
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob: ${MEDIA_SCHEME}:`,
     `media-src 'self' blob: ${MEDIA_SCHEME}:`,
-    `connect-src 'self' https://lrclib.net https://musicbrainz.org ${MEDIA_SCHEME}:`,
+    // lrclib.net: lyrics; musicbrainz.org: tag lookup; raw.githubusercontent.com: AutoEq headphone profiles (#24)
+    `connect-src 'self' https://lrclib.net https://musicbrainz.org https://raw.githubusercontent.com ${MEDIA_SCHEME}:`,
     "font-src 'self' data:",
     "object-src 'none'",
     "base-uri 'self'",
@@ -56,8 +57,14 @@ const APP_MIME_TYPES = {
     '.txt': 'text/plain; charset=utf-8'
 };
 
-// Keys the renderer may read/write through the store bridge.
-const STORE_KEYS = new Set(['stats', 'playlists', 'favorites', 'theme', 'musicFolder', 'libraryFilters', 'lyricsSettings']);
+// Keys the renderer may read/write through the store bridge ('dsp': EQ / crossfeed settings, #24).
+const STORE_KEYS = new Set(['stats', 'playlists', 'favorites', 'theme', 'musicFolder', 'libraryFilters', 'lyricsSettings', 'dsp']);
+// Keys an earlier build kept here and which now live in IndexedDB (src/services/blobStore.js):
+// the renderer may read them once for its migration and clear them, never write them.
+const LEGACY_STORE_KEYS = new Set(['autoeqIndex', 'autoeqProfiles']);
+
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const MIME_TYPES = {
     '.flac': 'audio/flac',
@@ -81,7 +88,9 @@ const WINDOW_MAX_DIMENSION = 16384;
 protocol.registerSchemesAsPrivileged([
     {
         scheme: MEDIA_SCHEME,
-        privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true }
+        // corsEnabled: the renderer (crossroads-app://app) loads audio and album art from this
+        // scheme with crossOrigin="anonymous" so Web Audio and canvas can read the samples/pixels.
+        privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true }
     },
     {
         scheme: APP_SCHEME,
@@ -282,6 +291,33 @@ function textResponse(status, message) {
     });
 }
 
+// CORS for the media scheme. The renderer loads audio with crossOrigin="anonymous" (Web Audio's
+// MediaElementAudioSourceNode renders silence on cross-origin media otherwise, #24) and album
+// art the same way for canvas colour extraction (#26). Every media/art response names the
+// app's own origin (crossroads-app://app, or the Vite dev server in development) and nothing
+// else, so a page from any other origin cannot read library bytes.
+const RENDERER_ORIGIN = IS_DEV ? new URL(DEV_URL).origin : APP_ORIGIN;
+
+function corsHeaders() {
+    return {
+        'Access-Control-Allow-Origin': RENDERER_ORIGIN,
+        'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
+        'Vary': 'Origin'
+    };
+}
+
+function preflightResponse() {
+    return new Response(null, {
+        status: 204,
+        headers: {
+            ...corsHeaders(),
+            'Access-Control-Allow-Methods': 'GET, HEAD',
+            'Access-Control-Allow-Headers': 'Range',
+            'Access-Control-Max-Age': '86400'
+        }
+    });
+}
+
 // --- crossroads-app://app/<path under dist/> ---------------------------------------------------
 // Serves the built renderer. Only files inside dist/ are reachable, and every response carries
 // the CSP (a webRequest header hook would not apply to file:// loads, hence the scheme).
@@ -390,6 +426,7 @@ async function handleArtRequest(request) {
     const picture = await readEmbeddedPicture(filePath);
     if (!picture) return textResponse(404, 'Not Found');
     const headers = {
+        ...corsHeaders(),
         'Content-Type': picture.format,
         'Content-Length': String(picture.data.length),
         'Cache-Control': 'max-age=86400'
@@ -399,6 +436,7 @@ async function handleArtRequest(request) {
 }
 
 async function handleMediaRequest(request) {
+    if (request.method === 'OPTIONS') return preflightResponse();
     if (request.method !== 'GET' && request.method !== 'HEAD') {
         return textResponse(405, 'Method Not Allowed');
     }
@@ -426,6 +464,7 @@ async function handleMediaRequest(request) {
     const size = stat.size;
     const contentType = MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
     const headers = {
+        ...corsHeaders(),
         'Content-Type': contentType,
         'Accept-Ranges': 'bytes',
         'Cache-Control': 'no-store',
@@ -473,12 +512,17 @@ ipcMain.handle('dialog:openDirectory', async () => {
 });
 
 ipcMain.handle('store:get', (_event, key) => {
-    if (typeof key !== 'string' || !STORE_KEYS.has(key)) return undefined;
+    if (typeof key !== 'string' || !(STORE_KEYS.has(key) || LEGACY_STORE_KEYS.has(key))) return undefined;
     return store.get(key);
 });
 
 ipcMain.handle('store:set', (_event, key, value) => {
-    if (typeof key !== 'string' || !STORE_KEYS.has(key)) return;
+    if (typeof key !== 'string') return;
+    if (LEGACY_STORE_KEYS.has(key)) {
+        if (value === undefined || value === null) store.delete(key);
+        return;
+    }
+    if (!STORE_KEYS.has(key)) return;
     if (key === 'musicFolder') {
         // Only the dialog path may change the music root; accept a renderer write only
         // when it merely echoes the folder that was already selected via the dialog.
@@ -578,6 +622,41 @@ registerMetadataIpc({
     ipcMain, dialog, getWindow,
     getMusicRoot: () => allowedMusicRoot,
     resolveLibraryFile, enqueueIndexJob, getLibraryIndex, modelVersionOf
+});
+
+// Saves a PNG rendered by the renderer (Wrapped slide export, #27). Restricted to images: the
+// bytes must carry the PNG signature and the user picks the location in a native save dialog
+// whose filter only offers .png. A chosen name that still lacks the extension is refused
+// rather than silently written elsewhere (appending .png after the dialog would bypass the
+// overwrite confirmation the user just answered for a different path).
+ipcMain.handle('image:save', async (_event, filename, base64) => {
+    if (typeof base64 !== 'string' || base64.length === 0 || base64.length > MAX_IMAGE_BYTES * 4 / 3) {
+        return { saved: false, message: 'Invalid image data' };
+    }
+    const bytes = Buffer.from(base64, 'base64');
+    if (bytes.length < PNG_SIGNATURE.length || !bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+        return { saved: false, message: 'Not a PNG image' };
+    }
+    let safeName = (typeof filename === 'string' ? path.basename(filename) : '').replace(/[^A-Za-z0-9._-]/g, '_');
+    if (!safeName || safeName.startsWith('.')) safeName = 'crossroads-wrapped.png';
+    if (!safeName.toLowerCase().endsWith('.png')) safeName += '.png';
+
+    let pictures;
+    try { pictures = app.getPath('pictures'); } catch { pictures = app.getPath('home'); }
+    const options = {
+        title: 'Save image',
+        defaultPath: path.join(pictures, safeName),
+        filters: [{ name: 'PNG image', extensions: ['png'] }],
+        properties: ['createDirectory', 'showOverwriteConfirmation']
+    };
+    const win = getWindow();
+    const { canceled, filePath } = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+    if (canceled || !filePath) return { saved: false, canceled: true };
+    if (!filePath.toLowerCase().endsWith('.png')) {
+        return { saved: false, message: `Not saved: the file name must end in .png (${path.basename(filePath)})` };
+    }
+    await fsp.writeFile(filePath, bytes);
+    return { saved: true, path: filePath };
 });
 
 // Window Controls

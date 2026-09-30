@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Repeat, Shuffle, Heart, Quote, Minimize2, Info } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, Repeat, Shuffle, Heart, Quote, Minimize2, Info, Disc3, Activity } from 'lucide-react';
 import { formatTime } from '../utils/format';
 import Artwork from './Artwork';
 import QualityBadge from './QualityBadge';
@@ -27,7 +27,9 @@ const Player = ({
     onTrackInfo,
     currentView,
     onToggleMiniMode,
-    canMiniMode = true
+    canMiniMode = true,
+    onOpenVinyl,
+    dspActive = false
 }) => {
     const performers = useMemo(() => (currentSong ? performersLine(currentSong) : ''), [currentSong]);
     const progress = duration ? (currentTime / duration) * 100 : 0;
@@ -37,12 +39,15 @@ const Player = ({
             <div className="track-info">
                 {currentSong ? (
                     <>
-                        <div className="track-art">
+                        <div className={`track-art ${onOpenVinyl ? 'clickable' : ''}`} onClick={onOpenVinyl} title={onOpenVinyl ? 'Now playing (vinyl)' : undefined}>
                             <Artwork src={currentSong.picture} alt="Cover" placeholder={<div className="art-placeholder" />} />
                         </div>
                         <div className="track-details">
                             <span className="track-title">{currentSong.title}</span>
-                            <span className="track-artist">{currentSong.artist}</span>
+                            <span className="track-artist">
+                                {dspActive && <span className="dsp-badge" title="EQ / crossfeed active: not bit-perfect"><Activity size={10} /> DSP</span>}
+                                {currentSong.artist}
+                            </span>
                             {performers && <span className="track-performers" title={performers}>{performers}</span>}
                             <QualityBadge quality={currentSong.quality} compact className="player-quality-inline" />
                         </div>
@@ -124,6 +129,12 @@ const Player = ({
                     {onTrackInfo && (
                         <button className="icon-btn sm" onClick={onTrackInfo} disabled={!currentSong} title="Track info">
                             <Info size={18} />
+                        </button>
+                    )}
+
+                    {onOpenVinyl && (
+                        <button className="icon-btn sm vinyl-btn" onClick={onOpenVinyl} disabled={!currentSong} title="Now playing (vinyl)">
+                            <Disc3 size={18} />
                         </button>
                     )}
 
