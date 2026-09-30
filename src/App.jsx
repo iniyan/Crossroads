@@ -10,6 +10,7 @@ import { Minimize2, Minus, Square, X, Menu, Sun, Moon } from 'lucide-react';
 import './styles/global.css';
 import Platform from './services/PlatformService';
 import { appendPlay, backfillTrackKeys, setListened, ListenTimer } from './library/playHistory';
+import { useQualityLibrary } from './components/quality/QualityProvider';
 
 const STATS_SAVE_INTERVAL = 15000;
 const MAX_VIEW_HISTORY = 20;
@@ -74,6 +75,10 @@ export default function App() {
     const musicFolderRef = useRef(null);      // the folder (or Android 'mediastore' sentinel) the library came from
 
     const canMiniMode = Platform.supportsMiniMode();
+
+    // Fake lossless / fake hi-res analyser (#28): library + its root for result pruning,
+    // playback for throttling.
+    useQualityLibrary(songs, isPlaying, musicFolderRef);
 
     // Mobile Detection
     useEffect(() => {

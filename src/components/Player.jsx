@@ -2,6 +2,7 @@ import React from 'react';
 import { Play, Pause, SkipBack, SkipForward, Volume2, Repeat, Shuffle, Heart, Quote, Minimize2 } from 'lucide-react';
 import { formatTime } from '../utils/format';
 import Artwork from './Artwork';
+import QualityBadge from './quality/QualityBadge';
 import '../styles/Player.css';
 
 const Player = ({
@@ -135,6 +136,7 @@ const Player = ({
                             {currentSong.lossless === true && <span className="lossless-badge">LOSSLESS</span>}
                             {currentSong.lossless === false && <span>COMPRESSED</span>}
                             {currentSong.bitsPerSample && <span>{currentSong.bitsPerSample}-bit</span>}
+                            <QualityBadge song={currentSong} className="q-player-badge" />
                         </div>
                         <div className="tech-details-nerd">
                             {currentSong.sampleRate && <span>{Math.round(currentSong.sampleRate / 100) / 10}kHz</span>}

@@ -1,0 +1,418 @@
+/* Quality analyser (#28): badges, details panel, progress toast. Uses the app's theme
+   variables; the few extra colours are defined here for both themes. */
+
+:root {
+    --q-warn: #f59e0b;
+    --q-warn-bg: rgba(245, 158, 11, 0.14);
+    --q-ok: #34d399;
+    --q-neutral: #93a4c3;            /* band-limited: a fact, not an accusation */
+    --q-neutral-bg: rgba(147, 164, 195, 0.14);
+    --q-panel-bg: #14141d;
+    --q-panel-border: rgba(255, 255, 255, 0.08);
+    --q-row-bg: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="light"] {
+    --q-warn: #b45309;
+    --q-warn-bg: rgba(180, 83, 9, 0.12);
+    --q-ok: #059669;
+    --q-neutral: #526480;
+    --q-neutral-bg: rgba(82, 100, 128, 0.12);
+    --q-panel-bg: #ffffff;
+    --q-panel-border: rgba(15, 23, 42, 0.1);
+    --q-row-bg: rgba(15, 23, 42, 0.04);
+}
+
+/* ---- Badges ---- */
+
+.q-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: 999px;
+    white-space: nowrap;
+    vertical-align: middle;
+    margin: 0 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+button.q-badge:hover {
+    transform: none;
+}
+
+.q-badge.q-suspicious {
+    background: var(--q-warn-bg);
+    color: var(--q-warn);
+}
+
+.q-badge.q-neutral {
+    background: var(--q-neutral-bg);
+    color: var(--q-neutral);
+    font-weight: 500;
+}
+
+.q-badge.q-genuine {
+    color: var(--q-ok);
+    opacity: 0.55;
+    padding: 3px;
+}
+
+.q-badge.q-genuine:hover,
+.q-badge.q-muted:hover {
+    opacity: 1;
+}
+
+.q-badge.q-muted {
+    opacity: 0.45;
+    padding: 3px;
+}
+
+.q-badge.q-busy {
+    opacity: 0.7;
+    padding: 3px;
+}
+
+.q-badge.q-album {
+    margin: 6px 0 0 0;
+}
+
+.q-spin {
+    animation: q-spin 1s linear infinite;
+}
+
+@keyframes q-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ---- Buttons / toolbar ---- */
+
+.q-analyze-btn,
+.q-filter-btn,
+.q-secondary-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-radius: 30px;
+    font-weight: 600;
+    font-size: 13px;
+    background: var(--q-row-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--q-panel-border);
+    transition: all 0.2s;
+}
+
+.q-analyze-btn:disabled,
+.q-filter-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+    transform: none;
+}
+
+.q-analyze-btn:not(:disabled):hover {
+    border-color: var(--accent-monitor);
+    transform: scale(1.03);
+}
+
+.q-filter-btn.active {
+    background: var(--q-warn-bg);
+    color: var(--q-warn);
+    border-color: var(--q-warn);
+}
+
+.q-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: -8px 0 20px 0;
+}
+
+.q-status {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* ---- Details panel ---- */
+
+.q-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    animation: fadeIn 0.2s ease-out;
+}
+
+.q-panel {
+    width: 720px;
+    max-width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--q-panel-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--q-panel-border);
+    border-radius: 20px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.q-panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 24px 12px 24px;
+    border-bottom: 1px solid var(--q-panel-border);
+}
+
+.q-panel-title h3 {
+    margin: 0;
+    font-size: 18px;
+    line-height: 1.2;
+}
+
+.q-panel-title p {
+    margin: 4px 0 0 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.q-close {
+    color: var(--text-secondary);
+    padding: 4px;
+    flex-shrink: 0;
+}
+
+.q-panel-body {
+    padding: 16px 24px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.q-verdict {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: var(--q-row-bg);
+}
+
+.q-verdict.q-warn {
+    background: var(--q-warn-bg);
+    color: var(--q-warn);
+}
+
+.q-verdict.q-ok {
+    color: var(--q-ok);
+}
+
+.q-verdict.q-neutral {
+    background: var(--q-neutral-bg);
+    color: var(--q-neutral);
+}
+
+.q-verdict.q-muted {
+    color: var(--text-secondary);
+}
+
+.q-verdict-title {
+    font-weight: 700;
+    font-size: 15px;
+}
+
+.q-conf {
+    font-weight: 500;
+    font-size: 12px;
+    opacity: 0.85;
+}
+
+.q-verdict-summary {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--text-primary);
+    line-height: 1.45;
+}
+
+.q-details {
+    margin: 12px 0 0 0;
+    padding-left: 20px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.q-section {
+    margin-top: 18px;
+}
+
+.q-section h4 {
+    margin: 0 0 8px 0;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+}
+
+.q-section p {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+}
+
+.q-spectrum {
+    display: block;
+    width: 100%;
+    border-radius: 8px;
+    background: var(--q-row-bg);
+}
+
+.q-hint {
+    margin: 12px 0 0 0;
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.8;
+    line-height: 1.45;
+}
+
+.q-hist {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 60px;
+    padding: 4px 6px 0 6px;
+    border-radius: 8px;
+    background: var(--q-row-bg);
+}
+
+.q-hist-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    height: 100%;
+    font-size: 9px;
+    color: var(--text-secondary);
+    gap: 2px;
+}
+
+.q-hist-bar {
+    width: 100%;
+    background: var(--accent-monitor);
+    border-radius: 2px 2px 0 0;
+    opacity: 0.8;
+}
+
+.q-windows {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.q-window {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: var(--q-row-bg);
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.q-window.silent,
+.q-window.dull {
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+.q-panel-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 12px 24px 18px 24px;
+    border-top: 1px solid var(--q-panel-border);
+}
+
+/* ---- Progress toast ---- */
+
+.q-progress {
+    position: fixed;
+    right: 20px;
+    bottom: 104px;
+    z-index: 900;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 300px;
+    max-width: calc(100vw - 40px);
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--q-panel-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--q-panel-border);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    animation: fadeIn 0.2s ease-out;
+}
+
+.q-progress-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.q-progress-title {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.q-progress-track {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.q-progress-bar {
+    margin-top: 6px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--q-row-bg);
+    overflow: hidden;
+}
+
+.q-progress-bar > div {
+    height: 100%;
+    background: var(--accent-monitor);
+    transition: width 0.3s;
+}
+
+.is-mobile .q-progress {
+    bottom: 100px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+}
+
+@media (max-width: 767px) {
+    .q-overlay {
+        padding: 0;
+        align-items: flex-end;
+    }
+
+    .q-panel {
+        max-height: 92vh;
+        border-radius: 20px 20px 0 0;
+    }
+}

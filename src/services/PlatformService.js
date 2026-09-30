@@ -131,6 +131,9 @@ let notificationPermissionRequested = false;
 const PlatformService = {
     isElectron: () => isElectron,
 
+    // Running inside the Capacitor shell (Android): background work should yield to battery.
+    isNative: () => isNative,
+
     supportsMiniMode: () => isElectron,
 
     convertFileSrc: (path) => {
