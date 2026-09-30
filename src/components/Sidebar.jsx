@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Home, Library, Disc, Music, ListMusic, Plus, Sparkles, Check, X, Quote } from 'lucide-react';
+import { Home, Library, Disc, Music, ListMusic, Plus, Sparkles, Check, X, Quote, Folder, User } from 'lucide-react';
 import '../styles/Sidebar.css';
 
-const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], onCreatePlaylist, onOpenPlaylist, selectedPlaylistId }) => {
+const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], onCreatePlaylist, onOpenPlaylist, selectedPlaylistId, hasClassical = false }) => {
     const [isCreating, setIsCreating] = useState(false);
     const [newName, setNewName] = useState('');
 
@@ -42,6 +42,22 @@ const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], o
                     <Library size={20} />
                     <span>Library</span>
                 </div>
+                <div
+                    className={`nav-item ${view === 'folders' ? 'active' : ''}`}
+                    onClick={() => setView('folders')}
+                >
+                    <Folder size={20} />
+                    <span>Folders</span>
+                </div>
+                {hasClassical && (
+                    <div
+                        className={`nav-item ${view === 'classical' ? 'active' : ''}`}
+                        onClick={() => setView('classical')}
+                    >
+                        <User size={20} />
+                        <span>Composers</span>
+                    </div>
+                )}
                 <div
                     className={`nav-item ${view === 'lyrics' ? 'active' : ''}`}
                     onClick={() => setView('lyrics')}

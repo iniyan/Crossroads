@@ -2,10 +2,18 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Play, MoreVertical, Shuffle, Heart } from 'lucide-react';
 import { formatTime, formatTotalTime } from '../utils/format';
 import Artwork from './Artwork';
+import QualityBadge from './QualityBadge';
+import QualityFilters, { useQualityFilters } from './QualityFilters';
+import { albumMatchesFilter, albumQuality } from '../library/qualityGroups';
+import useViewBack from './useViewBack';
+import viewMemory from './viewMemory';
+import { trackDisplayTitle } from '../library/classical';
 import '../styles/Library.css';
 
-const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites = [], onToggleFavorite }) => {
-    const [selectedAlbum, setSelectedAlbum] = useState(null);
+const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites = [], onToggleFavorite, backRef }) => {
+    const [selectedKey, setSelectedKeyState] = useState(viewMemory.albumKey);
+    const setSelectedKey = (key) => { viewMemory.albumKey = key; setSelectedKeyState(key); };
+    const [filters, updateFilters] = useQualityFilters();
     const [contextMenu, setContextMenu] = useState(null);
 
     const albums = useMemo(() => {
@@ -34,9 +42,28 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                 const artists = new Set(album.songs.map(s => s.artist).filter(Boolean));
                 artist = artists.size > 1 ? 'Various Artists' : (album.songs[0]?.artist || 'Unknown Artist');
             }
-            return { ...album, artist };
+            return { ...album, artist, quality: albumQuality(album.songs) };
         });
     }, [songs]);
+
+    // Looked up by key so the open album follows library refreshes (Android finishes probing
+    // files in the background and the songs are replaced).
+    const selectedAlbum = useMemo(() => albums.find(a => a.key === selectedKey) || null, [albums, selectedKey]);
+    const visibleAlbums = useMemo(() => albums.filter(a => albumMatchesFilter(a.songs, filters, a.quality)), [albums, filters]);
+
+    // Per-row display data, recomputed only when the open album changes (not on every
+    // playback tick).
+    const detail = useMemo(() => selectedAlbum && ({
+        totalDuration: selectedAlbum.songs.reduce((acc, s) => acc + (s.duration || 0), 0),
+        rows: selectedAlbum.songs.map(song => ({ song, title: trackDisplayTitle(song) }))
+    }), [selectedAlbum]);
+
+    // Back closes the open album first.
+    useViewBack(backRef, () => {
+        if (!selectedKey) return false;
+        setSelectedKey(null);
+        return true;
+    });
 
     const handleContextMenu = (e, song) => {
         e.preventDefault();
@@ -63,11 +90,11 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
     }, []);
 
     if (selectedAlbum) {
-        const totalDuration = selectedAlbum.songs.reduce((acc, s) => acc + (s.duration || 0), 0);
+        const { totalDuration, rows } = detail;
 
         return (
             <div className="album-detail">
-                <button className="back-btn" onClick={() => setSelectedAlbum(null)}>← Back to Library</button>
+                <button className="back-btn" onClick={() => setSelectedKey(null)}>← Back to Library</button>
 
                 <div className="album-header">
                     <div className="album-cover-lg">
@@ -81,7 +108,10 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                                 <span className="composer-tag"> • Music: {selectedAlbum.songs[0].composer}</span>
                             )}
                         </p>
-                        <p className="meta">{selectedAlbum.songs.length} songs • {formatTotalTime(totalDuration)}</p>
+                        <p className="meta">
+                            {selectedAlbum.songs.length} songs • {formatTotalTime(totalDuration)}
+                            <QualityBadge quality={selectedAlbum.quality} mixed={selectedAlbum.quality.mixed} />
+                        </p>
                         <div className="action-buttons">
                             <button className="play-all-btn" onClick={() => selectedAlbum.songs.length > 0 && onPlaySong(selectedAlbum.songs[0], selectedAlbum.songs)}>
                                 <Play fill="white" size={20} /> Play
@@ -94,7 +124,7 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                 </div>
 
                 <div className="track-list">
-                    {selectedAlbum.songs.map((song, i) => (
+                    {rows.map(({ song, title }, i) => (
                         <div
                             key={song.path}
                             className="track-row"
@@ -106,7 +136,8 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                             <div className="track-fav-icon" onClick={(e) => { e.stopPropagation(); onToggleFavorite(song.path); }}>
                                 <Heart size={14} fill={favorites.includes(song.path) ? "var(--accent-color)" : "none"} color={favorites.includes(song.path) ? "var(--accent-color)" : "var(--text-secondary)"} />
                             </div>
-                            <span className="track-name">{song.title}</span>
+                            <span className="track-name">{title}</span>
+                            <QualityBadge quality={song.quality} compact />
                             <span className="track-dur">{formatTime(song.duration)}</span>
                             <button className="context-btn icon-btn sm" onClick={(e) => handleContextMenu(e, song)} style={{ marginLeft: 10 }}>
                                 <MoreVertical size={16} />
@@ -136,11 +167,13 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
     return (
         <div className="library">
             <h1>Library</h1>
+            <QualityFilters filters={filters} onChange={updateFilters} />
             <div className="album-grid">
-                {albums.map(album => (
-                    <div key={album.key} className="album-card" onClick={() => setSelectedAlbum(album)}>
+                {visibleAlbums.map(album => (
+                    <div key={album.key} className="album-card" onClick={() => setSelectedKey(album.key)}>
                         <div className="album-cover">
                             <Artwork src={album.cover} placeholder={<div className="placeholder" />} />
+                            <QualityBadge quality={album.quality} mixed={album.quality.mixed} compact />
                         </div>
                         <div className="album-title">{album.title}</div>
                         <div className="album-artist">
@@ -152,6 +185,9 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
             </div>
             {albums.length === 0 && (
                 <div className="empty-message">No music found. Add a folder to get started.</div>
+            )}
+            {albums.length > 0 && visibleAlbums.length === 0 && (
+                <div className="empty-message">No albums match these filters.</div>
             )}
         </div>
     );

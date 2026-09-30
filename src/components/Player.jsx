@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Volume2, Repeat, Shuffle, Heart, Quote, Minimize2 } from 'lucide-react';
 import { formatTime } from '../utils/format';
 import Artwork from './Artwork';
+import QualityBadge from './QualityBadge';
+import { performersLine } from '../library/classical';
 import '../styles/Player.css';
 
 const Player = ({
@@ -26,6 +28,7 @@ const Player = ({
     onToggleMiniMode,
     canMiniMode = true
 }) => {
+    const performers = useMemo(() => (currentSong ? performersLine(currentSong) : ''), [currentSong]);
     const progress = duration ? (currentTime / duration) * 100 : 0;
 
     return (
@@ -39,6 +42,8 @@ const Player = ({
                         <div className="track-details">
                             <span className="track-title">{currentSong.title}</span>
                             <span className="track-artist">{currentSong.artist}</span>
+                            {performers && <span className="track-performers" title={performers}>{performers}</span>}
+                            <QualityBadge quality={currentSong.quality} compact className="player-quality-inline" />
                         </div>
                         <button
                             className={`favorite-btn ${isFavorite ? 'active' : ''}`}
@@ -131,15 +136,10 @@ const Player = ({
             <div className="audio-tech-info">
                 {currentSong && (
                     <>
-                        <div className="tech-badge">
-                            {currentSong.lossless === true && <span className="lossless-badge">LOSSLESS</span>}
-                            {currentSong.lossless === false && <span>COMPRESSED</span>}
-                            {currentSong.bitsPerSample && <span>{currentSong.bitsPerSample}-bit</span>}
-                        </div>
+                        <QualityBadge quality={currentSong.quality} />
                         <div className="tech-details-nerd">
                             {currentSong.sampleRate && <span>{Math.round(currentSong.sampleRate / 100) / 10}kHz</span>}
                             {currentSong.bitrate && <span>{Math.round(currentSong.bitrate / 1000)}kbps</span>}
-                            {currentSong.format && <span className="format-tag">{currentSong.format}</span>}
                         </div>
                     </>
                 )}

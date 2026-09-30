@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import Player from './components/Player';
 import Dashboard from './components/Dashboard';
@@ -6,9 +6,13 @@ import Library from './components/Library';
 import PlaylistView from './components/PlaylistView';
 import MiniPlayer from './components/MiniPlayer';
 import LyricsView from './components/LyricsView';
+import FoldersView from './components/FoldersView';
+import ClassicalView from './components/ClassicalView';
 import { Minimize2, Minus, Square, X, Menu, Sun, Moon } from 'lucide-react';
 import './styles/global.css';
 import Platform from './services/PlatformService';
+import { hasClassicalMusic } from './library/classical';
+import { shuffled } from './utils/list';
 import { appendPlay, backfillTrackKeys, setListened, ListenTimer } from './library/playHistory';
 
 const STATS_SAVE_INTERVAL = 15000;
@@ -71,6 +75,7 @@ export default function App() {
     const seekPushTimer = useRef(null);
     const listenTimerRef = useRef(new ListenTimer());   // seconds the current play has actually played
     const currentPlayRef = useRef(null);      // { path, timestamp } of the play-history entry being timed
+    const viewBackRef = useRef(null);         // a view's own "go up" handler (folders, composers), tried before the view history
     const musicFolderRef = useRef(null);      // the folder (or Android 'mediastore' sentinel) the library came from
 
     const canMiniMode = Platform.supportsMiniMode();
@@ -199,11 +204,7 @@ export default function App() {
     }, [flushStats, commitListened]);
 
     const generateShuffledQueue = (originalQueue, currentSongPath) => {
-        let newQueue = [...originalQueue];
-        for (let i = newQueue.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [newQueue[i], newQueue[j]] = [newQueue[j], newQueue[i]];
-        }
+        let newQueue = shuffled(originalQueue);
         if (currentSongPath) {
             newQueue = newQueue.filter(s => s.path !== currentSongPath);
             const currentSong = originalQueue.find(s => s.path === currentSongPath);
@@ -323,6 +324,8 @@ export default function App() {
         return true;
     }, []);
 
+    const hasClassical = useMemo(() => hasClassicalMusic(songs), [songs]);
+
     const currentSong = isShuffle ? shuffledQueue[playIndex] : queue[playIndex];
 
     // Keep the latest state/handlers reachable from listeners registered once
@@ -379,6 +382,7 @@ export default function App() {
             Platform.onBackButton(() => {
                 const { isMobile: mobile, sidebarOpen: open, view: curView } = latest.current;
                 if (mobile && open) { setSidebarOpen(false); return; }
+                if (viewBackRef.current?.()) return;
                 if (goBack()) return;
                 if (curView !== 'dashboard') { setView('dashboard'); return; }
                 flushStats();
@@ -517,7 +521,8 @@ export default function App() {
         setPlaylists(prev => prev.map(pl => {
             if (pl.id === playlistId) {
                 const newSongs = [...pl.songs];
-                songsArray.forEach(song => { if (!newSongs.includes(song.path)) newSongs.push(song.path); });
+                const seen = new Set(newSongs);
+                songsArray.forEach(song => { if (!seen.has(song.path)) { seen.add(song.path); newSongs.push(song.path); } });
                 return { ...pl, songs: newSongs };
             }
             return pl;
@@ -630,6 +635,7 @@ export default function App() {
                         onCreatePlaylist={createPlaylist}
                         onOpenPlaylist={(id) => { openPlaylist(id); if (isMobile) setSidebarOpen(false); }}
                         selectedPlaylistId={selectedPlaylistId}
+                        hasClassical={hasClassical}
                     />
                     {isMobile && sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
                 </div>
@@ -639,6 +645,19 @@ export default function App() {
                         <Library
                             songs={songs} onPlaySong={playSong} playlists={playlists}
                             onAddToPlaylist={addToPlaylist} favorites={favorites} onToggleFavorite={toggleFavorite}
+                            backRef={viewBackRef}
+                        />
+                    )}
+                    {view === 'folders' && (
+                        <FoldersView
+                            songs={songs} onPlaySong={playSong} playlists={playlists}
+                            onAddToPlaylist={addToPlaylist} backRef={viewBackRef}
+                        />
+                    )}
+                    {view === 'classical' && (
+                        <ClassicalView
+                            songs={songs} onPlaySong={playSong} playlists={playlists}
+                            onAddToPlaylist={addToPlaylist} backRef={viewBackRef}
                         />
                     )}
                     {view === 'lyrics' && <LyricsView currentSong={currentSong} currentTime={currentTime} />}
