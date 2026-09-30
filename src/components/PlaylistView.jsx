@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Play, Trash2, Sparkles, Clock, Star, Heart, Plus, Search, Check, X, Disc } from 'lucide-react';
+import { formatTime, formatTotalTime } from '../utils/format';
+import { lifetimePlayCounts } from '../utils/stats';
 import '../styles/Library.css';
 
 const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, onDeletePlaylist, onToggleFavorite, onAddToPlaylist }) => {
@@ -14,23 +16,34 @@ const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, o
         setSelectedPaths(next);
     };
 
-    const handleAddSelected = () => {
-        const songsToAdd = Array.from(selectedPaths).map(path => allSongs.find(s => s.path === path)).filter(Boolean);
-        onAddToPlaylist(playlist.id, songsToAdd);
+    const closeAddDialog = () => {
         setIsAdding(false);
+        setSearch('');
         setSelectedPaths(new Set());
     };
 
-    if (!playlist) return null;
+    // A selection belongs to the playlist it was started in: never carry it over.
+    useEffect(() => {
+        setIsAdding(false);
+        setSearch('');
+        setSelectedPaths(new Set());
+    }, [playlist?.id]);
+
+    const handleAddSelected = () => {
+        const songsToAdd = Array.from(selectedPaths).map(path => allSongs.find(s => s.path === path)).filter(Boolean);
+        onAddToPlaylist(playlist.id, songsToAdd);
+        closeAddDialog();
+    };
 
     const playlistSongs = useMemo(() => {
+        if (!playlist) return [];
         if (!playlist.type) {
             // User Playlist
-            return playlist.songs.map(path => allSongs.find(s => s.path === path)).filter(Boolean);
+            return (playlist.songs || []).map(path => allSongs.find(s => s.path === path)).filter(Boolean);
         }
 
         // Smart Playlist Logic
-        const history = stats.playHistory || [];
+        const history = stats?.playHistory || [];
 
         if (playlist.id === 'favorites') {
             return (favorites || []).map(path => allSongs.find(s => s.path === path)).filter(Boolean);
@@ -52,11 +65,7 @@ const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, o
         }
 
         if (playlist.id === 'top-tracks') {
-            const counts = {};
-            history.forEach(play => {
-                counts[play.path] = (counts[play.path] || 0) + 1;
-            });
-            return Object.entries(counts)
+            return Object.entries(lifetimePlayCounts(stats))
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 30)
                 .map(([path]) => allSongs.find(s => s.path === path))
@@ -64,12 +73,12 @@ const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, o
         }
 
         if (playlist.id === 'recommendations') {
-            // Simple Recommend: Based on top artists
+            // Simple Recommend: Based on top artists (lifetime, including archived plays)
             const artistCounts = {};
-            history.forEach(play => {
-                const song = allSongs.find(s => s.path === play.path);
+            Object.entries(lifetimePlayCounts(stats)).forEach(([path, count]) => {
+                const song = allSongs.find(s => s.path === path);
                 if (song) {
-                    artistCounts[song.artist] = (artistCounts[song.artist] || 0) + 1;
+                    artistCounts[song.artist] = (artistCounts[song.artist] || 0) + count;
                 }
             });
             const topArtist = Object.entries(artistCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -81,7 +90,9 @@ const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, o
         }
 
         return [];
-    }, [playlist, allSongs, stats]);
+    }, [playlist, allSongs, stats, favorites]);
+
+    if (!playlist) return null;
 
     const isSmart = playlist.type === 'smart';
 
@@ -103,7 +114,7 @@ const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, o
                                     <Sparkles size={80} color="rgba(255,255,255,0.4)" />
                     ) : (
                         <div style={{ fontSize: 60, fontWeight: 'bold', color: 'rgba(255,255,255,0.3)' }}>
-                            {playlist.name[0].toUpperCase()}
+                            {(playlist.name || '?').charAt(0).toUpperCase()}
                         </div>
                     )}
                 </div>
@@ -112,14 +123,7 @@ const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, o
                         {isSmart ? 'SMART PLAYLIST' : 'USER PLAYLIST'}
                     </div>
                     <h1>{playlist.name}</h1>
-                    <p className="meta">{playlistSongs.length} songs • {
-                        (() => {
-                            const s = playlistSongs.reduce((acc, song) => acc + (song.duration || 0), 0);
-                            const mins = Math.floor(s / 60);
-                            const secs = Math.floor(s % 60);
-                            return `${mins} min ${secs < 10 ? '0' : ''}${secs} sec`;
-                        })()
-                    }</p>
+                    <p className="meta">{playlistSongs.length} songs • {formatTotalTime(playlistSongs.reduce((acc, song) => acc + (song.duration || 0), 0))}</p>
                     <div style={{ display: 'flex', gap: 10 }}>
                         <button className="play-all-btn" onClick={() => onPlaySong(playlistSongs[0], playlistSongs)} disabled={playlistSongs.length === 0}>
                             <Play fill="white" size={20} /> Play
@@ -155,12 +159,17 @@ const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, o
                                     autoFocus
                                 />
                             </div>
-                            <button className="icon-btn" onClick={() => setIsAdding(false)}><X /></button>
+                            <button className="icon-btn" onClick={closeAddDialog}><X /></button>
                         </div>
 
                         <div className="selection-list">
                             {allSongs
-                                .filter(s => s.title.toLowerCase().includes(search.toLowerCase()) || s.artist.toLowerCase().includes(search.toLowerCase()))
+                                .filter(s => {
+                                    const q = search.toLowerCase();
+                                    return (s.title || '').toLowerCase().includes(q)
+                                        || (s.artist || '').toLowerCase().includes(q)
+                                        || (s.album || '').toLowerCase().includes(q);
+                                })
                                 .map(song => (
                                     <div
                                         key={song.path}
@@ -179,7 +188,7 @@ const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, o
                         </div>
 
                         <div className="selection-footer">
-                            <button className="cancel-btn" onClick={() => setIsAdding(false)}>Cancel</button>
+                            <button className="cancel-btn" onClick={closeAddDialog}>Cancel</button>
                             <button
                                 className="add-all-btn"
                                 onClick={handleAddSelected}
@@ -212,7 +221,7 @@ const PlaylistView = ({ playlist, allSongs, stats, favorites = [], onPlaySong, o
                                 <span className="track-name">{song.title}</span>
                                 <span className="track-artist-sub">{song.artist} • {song.album}</span>
                             </div>
-                            <span className="track-dur">{(song.duration / 60).toFixed(0)}:{Math.floor(song.duration % 60).toString().padStart(2, '0')}</span>
+                            <span className="track-dur">{formatTime(song.duration)}</span>
                         </div>
                     ))
                 )}

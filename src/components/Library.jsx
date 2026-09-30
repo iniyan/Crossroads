@@ -1,5 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Play, MoreVertical, Shuffle, Heart } from 'lucide-react';
+import { formatTime, formatTotalTime } from '../utils/format';
+import Artwork from './Artwork';
 import '../styles/Library.css';
 
 const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites = [], onToggleFavorite }) => {
@@ -7,20 +9,33 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
     const [contextMenu, setContextMenu] = useState(null);
 
     const albums = useMemo(() => {
-        // ... (unchanged)
         const map = {};
-        songs.forEach(song => {
-            if (!map[song.album]) {
-                map[song.album] = {
-                    title: song.album,
-                    artist: song.artist,
+        (songs || []).forEach(song => {
+            const albumName = song.album || 'Unknown Album';
+            // Group by the explicit album-artist tag only ('' when absent), so compilations
+            // with a different artist per track stay one album instead of one card per artist.
+            const albumArtist = song.albumArtist || '';
+            const key = `${albumName}\u0000${albumArtist}`;
+            if (!map[key]) {
+                map[key] = {
+                    key,
+                    title: albumName,
+                    albumArtist,
                     cover: song.picture,
                     songs: []
                 };
             }
-            map[song.album].songs.push(song);
+            if (!map[key].cover && song.picture) map[key].cover = song.picture;
+            map[key].songs.push(song);
         });
-        return Object.values(map);
+        return Object.values(map).map(album => {
+            let artist = album.albumArtist;
+            if (!artist) {
+                const artists = new Set(album.songs.map(s => s.artist).filter(Boolean));
+                artist = artists.size > 1 ? 'Various Artists' : (album.songs[0]?.artist || 'Unknown Artist');
+            }
+            return { ...album, artist };
+        });
     }, [songs]);
 
     const handleContextMenu = (e, song) => {
@@ -49,11 +64,6 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
 
     if (selectedAlbum) {
         const totalDuration = selectedAlbum.songs.reduce((acc, s) => acc + (s.duration || 0), 0);
-        const formatTotalTime = (s) => {
-            const mins = Math.floor(s / 60);
-            const secs = Math.floor(s % 60);
-            return `${mins} min ${secs < 10 ? '0' : ''}${secs} sec`;
-        };
 
         return (
             <div className="album-detail">
@@ -61,7 +71,7 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
 
                 <div className="album-header">
                     <div className="album-cover-lg">
-                        {selectedAlbum.cover ? <img src={selectedAlbum.cover} alt="" /> : <div className="placeholder" />}
+                        <Artwork src={selectedAlbum.cover} placeholder={<div className="placeholder" />} />
                     </div>
                     <div className="album-info">
                         <h1>{selectedAlbum.title}</h1>
@@ -73,10 +83,10 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                         </p>
                         <p className="meta">{selectedAlbum.songs.length} songs • {formatTotalTime(totalDuration)}</p>
                         <div className="action-buttons">
-                            <button className="play-all-btn" onClick={() => onPlaySong(selectedAlbum.songs[0], selectedAlbum.songs)}>
+                            <button className="play-all-btn" onClick={() => selectedAlbum.songs.length > 0 && onPlaySong(selectedAlbum.songs[0], selectedAlbum.songs)}>
                                 <Play fill="white" size={20} /> Play
                             </button>
-                            <button className="shuffle-btn-flat" onClick={() => onPlaySong(selectedAlbum.songs[Math.floor(Math.random() * selectedAlbum.songs.length)], selectedAlbum.songs)}>
+                            <button className="shuffle-btn-flat" onClick={() => selectedAlbum.songs.length > 0 && onPlaySong(selectedAlbum.songs[Math.floor(Math.random() * selectedAlbum.songs.length)], selectedAlbum.songs)}>
                                 <Shuffle size={20} /> Shuffle
                             </button>
                         </div>
@@ -97,7 +107,7 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
                                 <Heart size={14} fill={favorites.includes(song.path) ? "var(--accent-color)" : "none"} color={favorites.includes(song.path) ? "var(--accent-color)" : "var(--text-secondary)"} />
                             </div>
                             <span className="track-name">{song.title}</span>
-                            <span className="track-dur">{(song.duration / 60).toFixed(0)}:{Math.floor(song.duration % 60).toString().padStart(2, '0')}</span>
+                            <span className="track-dur">{formatTime(song.duration)}</span>
                             <button className="context-btn icon-btn sm" onClick={(e) => handleContextMenu(e, song)} style={{ marginLeft: 10 }}>
                                 <MoreVertical size={16} />
                             </button>
@@ -128,9 +138,9 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
             <h1>Library</h1>
             <div className="album-grid">
                 {albums.map(album => (
-                    <div key={album.title} className="album-card" onClick={() => setSelectedAlbum(album)}>
+                    <div key={album.key} className="album-card" onClick={() => setSelectedAlbum(album)}>
                         <div className="album-cover">
-                            {album.cover ? <img src={album.cover} alt="" /> : <div className="placeholder" />}
+                            <Artwork src={album.cover} placeholder={<div className="placeholder" />} />
                         </div>
                         <div className="album-title">{album.title}</div>
                         <div className="album-artist">

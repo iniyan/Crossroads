@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Music, AlertCircle, Quote } from 'lucide-react';
+import Artwork from './Artwork';
 import '../styles/LyricsView.css';
 
 const LyricsView = ({ currentSong, currentTime, mini = false }) => {
@@ -12,29 +13,44 @@ const LyricsView = ({ currentSong, currentTime, mini = false }) => {
     useEffect(() => {
         if (!currentSong) return;
 
+        const controller = new AbortController();
+
         const fetchLyrics = async () => {
-            setLoading(true);
             setError(null);
             setLyrics(null);
 
-            try {
-                const { artist, title, album, duration } = currentSong;
-                const url = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist)}&track_name=${encodeURIComponent(title)}&album_name=${encodeURIComponent(album)}&duration=${Math.round(duration)}`;
+            const { artist, title, album, duration } = currentSong;
+            if (!title) {
+                setLoading(false);
+                setError('Could not find lyrics for this track.');
+                return;
+            }
 
-                const response = await fetch(url);
+            setLoading(true);
+            try {
+                const params = new URLSearchParams({ track_name: title });
+                if (artist) params.set('artist_name', artist);
+                if (album) params.set('album_name', album);
+                if (Number.isFinite(duration) && duration > 0) params.set('duration', String(Math.round(duration)));
+                const url = `https://lrclib.net/api/get?${params.toString()}`;
+
+                const response = await fetch(url, { signal: controller.signal });
                 if (!response.ok) throw new Error('Lyrics not found');
 
                 const data = await response.json();
+                if (controller.signal.aborted) return;
                 setLyrics(data);
+                setLoading(false);
             } catch (err) {
+                if (err.name === 'AbortError' || controller.signal.aborted) return;
                 console.error('Lyrics fetch error:', err);
                 setError('Could not find lyrics for this track.');
-            } finally {
                 setLoading(false);
             }
         };
 
         fetchLyrics();
+        return () => controller.abort();
     }, [currentSong?.path]);
 
     const parsedLyrics = useMemo(() => {
@@ -70,7 +86,7 @@ const LyricsView = ({ currentSong, currentTime, mini = false }) => {
     return (
         <div className={`lyrics-container ${mini ? 'is-mini' : ''}`}>
             <div className="lyrics-bg">
-                {currentSong.picture && <img src={currentSong.picture} alt="" />}
+                <Artwork src={currentSong.picture} />
                 <div className="lyrics-overlay" />
             </div>
 

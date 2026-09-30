@@ -6,9 +6,40 @@ import Library from './components/Library';
 import PlaylistView from './components/PlaylistView';
 import MiniPlayer from './components/MiniPlayer';
 import LyricsView from './components/LyricsView';
-import { Minimize2, Maximize2, Minus, Square, X, Menu, Sun, Moon } from 'lucide-react';
+import { Minimize2, Minus, Square, X, Menu, Sun, Moon } from 'lucide-react';
 import './styles/global.css';
 import Platform from './services/PlatformService';
+
+const STATS_SAVE_INTERVAL = 15000;
+const MAX_PLAY_HISTORY = 10000;
+const MAX_VIEW_HISTORY = 20;
+
+const persist = (key, value) =>
+    Promise.resolve(Platform.setStore(key, value)).catch(e => console.error(`Failed to save ${key}`, e));
+
+// Appends a play to the stats. When the timestamped history outgrows MAX_PLAY_HISTORY the
+// oldest entries are folded into `archivedCounts` / `archivedCount`, so lifetime totals
+// survive the trim (only the time-windowed views lose those plays).
+const recordPlay = (prev, songPath) => {
+    const playHistory = [...(prev.playHistory || []), { path: songPath, timestamp: Date.now() }];
+    if (playHistory.length <= MAX_PLAY_HISTORY) return { ...prev, playHistory };
+    const dropped = playHistory.splice(0, playHistory.length - MAX_PLAY_HISTORY);
+    const archivedCounts = { ...(prev.archivedCounts || {}) };
+    dropped.forEach(play => { archivedCounts[play.path] = (archivedCounts[play.path] || 0) + 1; });
+    return {
+        ...prev,
+        playHistory,
+        archivedCounts,
+        archivedCount: (prev.archivedCount || 0) + dropped.length
+    };
+};
+
+const safePlay = (audio) => {
+    const p = audio.play();
+    if (p && typeof p.catch === 'function') p.catch(e => console.warn('Playback failed', e));
+};
+
+const unsubscribe = (unsub) => { if (typeof unsub === 'function') unsub(); };
 
 export default function App() {
     const [songs, setSongs] = useState([]);
@@ -37,8 +68,22 @@ export default function App() {
     const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768);
     const [theme, setTheme] = useState('dark');
 
-    const audioRef = useRef(new Audio());
-    const statsInterval = useRef(null);
+    const audioRef = useRef(null);
+    if (!audioRef.current) audioRef.current = new Audio();
+
+    // Store keys whose saved value was read successfully. A key is only ever persisted once it
+    // is in here, so defaults never overwrite saved data (nor data we failed to read).
+    const loadedKeysRef = useRef(new Set());
+    const isLoaded = (key) => loadedKeysRef.current.has(key);
+    const statsRef = useRef(stats);
+    const statsDirtyRef = useRef(false);
+    const lastStatsSaveRef = useRef(0);
+    const statsSaveTimer = useRef(null);
+    const errorStreakRef = useRef(0);
+    const historyRef = useRef([]);            // previous { view, selectedPlaylistId } entries
+    const latest = useRef({});                // latest handlers/state for once-registered listeners
+
+    const canMiniMode = Platform.supportsMiniMode();
 
     // Mobile Detection
     useEffect(() => {
@@ -51,37 +96,84 @@ export default function App() {
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
+    const scanAndSetSongs = async (folder) => {
+        try {
+            const scannedSongs = (await Platform.scanFolder(folder)) || [];
+            setSongs(scannedSongs);
+            if (scannedSongs.length > 0) setView(v => v === 'dashboard' ? 'library' : v);
+        } catch (e) {
+            console.error('Failed to scan music folder', e);
+        }
+    };
+
     // Initial Data Load
     useEffect(() => {
+        let cancelled = false;
+        const read = async (key) => {
+            try {
+                const value = await Platform.getStore(key);
+                loadedKeysRef.current.add(key);
+                return value;
+            } catch (e) {
+                // Leave the key unloaded: it must not be overwritten with defaults this session.
+                console.error(`Failed to load ${key}; it will not be saved this session`, e);
+                return null;
+            }
+        };
         async function loadData() {
-            const savedStats = await Platform.getStore('stats');
+            const [savedStats, savedPlaylists, savedFavs, savedTheme, savedFolder] = await Promise.all(
+                ['stats', 'playlists', 'favorites', 'theme', 'musicFolder'].map(read)
+            );
+            if (cancelled) return;
             if (savedStats) setStats(savedStats);
-
-            const savedPlaylists = await Platform.getStore('playlists');
             if (savedPlaylists) setPlaylists(savedPlaylists);
-
-            const savedFavs = await Platform.getStore('favorites');
             if (savedFavs) setFavorites(savedFavs);
-
-            const savedFolder = await Platform.getStore('musicFolder');
-            if (savedFolder) scanAndSetSongs(savedFolder);
-
-            const savedTheme = await Platform.getStore('theme');
             if (savedTheme) setTheme(savedTheme);
+            if (savedFolder) scanAndSetSongs(savedFolder);
         }
         loadData();
+        return () => { cancelled = true; };
     }, []);
 
     // Apply theme
     useEffect(() => {
         document.documentElement.setAttribute('data-theme', theme);
-        Platform.setStore('theme', theme);
+        if (isLoaded('theme')) persist('theme', theme);
     }, [theme]);
 
-    // persistence
-    useEffect(() => { Platform.setStore('stats', stats); }, [stats]);
-    useEffect(() => { Platform.setStore('playlists', playlists); }, [playlists]);
-    useEffect(() => { Platform.setStore('favorites', favorites); }, [favorites]);
+    // persistence (skipped until the key's saved value has been read, see loadedKeysRef)
+    useEffect(() => { if (isLoaded('playlists')) persist('playlists', playlists); }, [playlists]);
+    useEffect(() => { if (isLoaded('favorites')) persist('favorites', favorites); }, [favorites]);
+
+    // Stats persistence: throttled to once per STATS_SAVE_INTERVAL, flushed on pause/hide
+    const flushStats = useCallback(() => {
+        clearTimeout(statsSaveTimer.current);
+        if (!loadedKeysRef.current.has('stats') || !statsDirtyRef.current) return;
+        statsDirtyRef.current = false;
+        lastStatsSaveRef.current = Date.now();
+        persist('stats', statsRef.current);
+    }, []);
+
+    useEffect(() => {
+        statsRef.current = stats;
+        if (!isLoaded('stats')) return;
+        statsDirtyRef.current = true;
+        const elapsed = Date.now() - lastStatsSaveRef.current;
+        if (elapsed >= STATS_SAVE_INTERVAL) { flushStats(); return; }
+        clearTimeout(statsSaveTimer.current);
+        statsSaveTimer.current = setTimeout(flushStats, STATS_SAVE_INTERVAL - elapsed);
+    }, [stats, flushStats]);
+
+    useEffect(() => {
+        const onVisibility = () => { if (document.visibilityState === 'hidden') flushStats(); };
+        document.addEventListener('visibilitychange', onVisibility);
+        window.addEventListener('pagehide', flushStats);
+        return () => {
+            document.removeEventListener('visibilitychange', onVisibility);
+            window.removeEventListener('pagehide', flushStats);
+            flushStats();
+        };
+    }, [flushStats]);
 
     const generateShuffledQueue = (originalQueue, currentSongPath) => {
         let newQueue = [...originalQueue];
@@ -100,32 +192,30 @@ export default function App() {
     const playAtIndex = useCallback((index, currentQueue) => {
         const song = currentQueue[index];
         if (!song) return;
-        audioRef.current.src = Platform.convertFileSrc(song.path);
-        audioRef.current.play();
-        setIsPlaying(true);
-        setStats(prev => ({
-            ...prev,
-            playHistory: [...(prev.playHistory || []), { path: song.path, timestamp: Date.now() }]
-        }));
+        const audio = audioRef.current;
+        audio.src = Platform.convertFileSrc(song.path);
+        safePlay(audio);
+        setStats(prev => recordPlay(prev, song.path));
     }, []);
 
     const togglePlay = useCallback(() => {
-        if (isPlaying) audioRef.current.pause();
-        else audioRef.current.play();
-        setIsPlaying(!isPlaying);
-    }, [isPlaying]);
+        const audio = audioRef.current;
+        if (!audio.src) return;
+        if (audio.paused) safePlay(audio);
+        else audio.pause();
+    }, []);
 
-    const playNext = useCallback((auto = false) => {
+    const playNext = useCallback(() => {
         const currentQ = isShuffle ? shuffledQueue : queue;
         if (playIndex < currentQ.length - 1) {
             const newIndex = playIndex + 1;
             setPlayIndex(newIndex);
             playAtIndex(newIndex, currentQ);
-        } else if (repeatMode === 1) {
+        } else if (repeatMode === 1 && currentQ.length > 0) {
             setPlayIndex(0);
             playAtIndex(0, currentQ);
         } else {
-            setIsPlaying(false);
+            audioRef.current.pause();
         }
     }, [isShuffle, shuffledQueue, queue, playIndex, repeatMode, playAtIndex]);
 
@@ -139,79 +229,135 @@ export default function App() {
             const newIndex = playIndex - 1;
             setPlayIndex(newIndex);
             playAtIndex(newIndex, currentQ);
-        } else if (repeatMode === 1) {
+        } else if (repeatMode === 1 && currentQ.length > 0) {
             setPlayIndex(currentQ.length - 1);
             playAtIndex(currentQ.length - 1, currentQ);
         }
     }, [isShuffle, shuffledQueue, queue, playIndex, repeatMode, playAtIndex]);
 
-    // Keyboard and Shortcuts
-    useEffect(() => {
-        const handleKeyDown = (e) => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-            if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
-            else if (e.code === 'ArrowRight') playNext();
-            else if (e.code === 'ArrowLeft') playPrev();
-        };
-        window.addEventListener('keydown', handleKeyDown);
-
-        Platform.onShortcut((event, type) => {
-            if (type === 'playPause') togglePlay();
-            if (type === 'next') playNext();
-            if (type === 'prev') playPrev();
-        });
-
-        Platform.onMenuScan(() => {
-            loadSongs();
-        });
-
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [togglePlay, playNext, playPrev]);
-
-    useEffect(() => {
-        const audio = audioRef.current;
-        const onTimeUpdate = () => setCurrentTime(audio.currentTime);
-        const onEnded = () => {
-            if (repeatMode === 2) { audio.currentTime = 0; audio.play(); }
-            else playNext(true);
-        };
-        const onLoadedMetadata = () => setDuration(audio.duration);
-        audio.addEventListener('timeupdate', onTimeUpdate);
-        audio.addEventListener('ended', onEnded);
-        audio.addEventListener('loadedmetadata', onLoadedMetadata);
-        return () => {
-            audio.removeEventListener('timeupdate', onTimeUpdate);
-            audio.removeEventListener('ended', onEnded);
-            audio.removeEventListener('loadedmetadata', onLoadedMetadata);
-        };
-    }, [queue, playIndex, repeatMode, isShuffle, shuffledQueue, playNext]);
-
-    useEffect(() => {
-        if (isPlaying) {
-            statsInterval.current = setInterval(() => {
-                setStats(prev => ({ ...prev, totalTime: (prev.totalTime || 0) + 1 }));
-            }, 1000);
-        } else if (statsInterval.current) {
-            clearInterval(statsInterval.current);
-        }
-        return () => clearInterval(statsInterval.current);
-    }, [isPlaying]);
-
-    const scanAndSetSongs = async (folder) => {
-        const scannedSongs = await Platform.scanFolder(folder);
-        setSongs(scannedSongs);
-        if (view === 'dashboard' && scannedSongs.length > 0) setView('library');
-    };
-
     const loadSongs = async () => {
         const folder = await Platform.selectFolder();
         if (folder) {
-            Platform.setStore('musicFolder', folder);
+            persist('musicFolder', folder);
             scanAndSetSongs(folder);
         }
     };
 
+    // Navigation with a small history stack (used by the Android back button)
+    const navigate = useCallback((nextView, playlistId) => {
+        const { view: curView, selectedPlaylistId: curId } = latest.current;
+        const nextId = playlistId === undefined ? curId : playlistId;
+        if (curView === nextView && curId === nextId) return;
+        historyRef.current.push({ view: curView, selectedPlaylistId: curId });
+        if (historyRef.current.length > MAX_VIEW_HISTORY) historyRef.current.shift();
+        setView(nextView);
+        setSelectedPlaylistId(nextId);
+    }, []);
+
+    const goBack = useCallback(() => {
+        const prev = historyRef.current.pop();
+        if (!prev) return false;
+        setView(prev.view);
+        setSelectedPlaylistId(prev.selectedPlaylistId);
+        return true;
+    }, []);
+
+    // Keep the latest state/handlers reachable from listeners registered once
+    useEffect(() => {
+        latest.current = {
+            view, selectedPlaylistId, isMobile, sidebarOpen, repeatMode,
+            queueLength: (isShuffle ? shuffledQueue : queue).length,
+            togglePlay, playNext, playPrev, loadSongs
+        };
+    });
+
+    // Keyboard, global shortcuts, menu and Android back button
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.code === 'Space') { e.preventDefault(); latest.current.togglePlay(); }
+            else if (e.code === 'ArrowRight') latest.current.playNext();
+            else if (e.code === 'ArrowLeft') latest.current.playPrev();
+        };
+        window.addEventListener('keydown', handleKeyDown);
+
+        const unsubs = [
+            Platform.onShortcut((type) => {
+                if (type === 'playPause') latest.current.togglePlay();
+                else if (type === 'next') latest.current.playNext();
+                else if (type === 'prev') latest.current.playPrev();
+            }),
+            Platform.onMenuScan(() => latest.current.loadSongs()),
+            Platform.onBackButton(() => {
+                const { isMobile: mobile, sidebarOpen: open, view: curView } = latest.current;
+                if (mobile && open) { setSidebarOpen(false); return; }
+                if (goBack()) return;
+                if (curView !== 'dashboard') { setView('dashboard'); return; }
+                flushStats();
+                Platform.exitApp();
+            })
+        ];
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            unsubs.forEach(unsubscribe);
+        };
+    }, [goBack, flushStats]);
+
+    // Audio element events: isPlaying is derived from the element itself
+    useEffect(() => {
+        const audio = audioRef.current;
+        const onPlay = () => setIsPlaying(true);
+        const onPause = () => setIsPlaying(false);
+        const onPlaying = () => { errorStreakRef.current = 0; };
+        const onTimeUpdate = () => setCurrentTime(audio.currentTime);
+        const onLoadedMetadata = () => setDuration(audio.duration);
+        const onEnded = () => {
+            if (latest.current.repeatMode === 2) { audio.currentTime = 0; safePlay(audio); }
+            else latest.current.playNext();
+        };
+        const onError = () => {
+            if (!audio.src) return;
+            console.error('Audio error', audio.error, audio.src);
+            errorStreakRef.current += 1;
+            if (errorStreakRef.current >= latest.current.queueLength) {
+                console.error('Every track in the queue failed to play; stopping.');
+                errorStreakRef.current = 0;
+                audio.pause();
+                return;
+            }
+            latest.current.playNext();
+        };
+        audio.addEventListener('play', onPlay);
+        audio.addEventListener('pause', onPause);
+        audio.addEventListener('playing', onPlaying);
+        audio.addEventListener('timeupdate', onTimeUpdate);
+        audio.addEventListener('loadedmetadata', onLoadedMetadata);
+        audio.addEventListener('ended', onEnded);
+        audio.addEventListener('error', onError);
+        return () => {
+            audio.removeEventListener('play', onPlay);
+            audio.removeEventListener('pause', onPause);
+            audio.removeEventListener('playing', onPlaying);
+            audio.removeEventListener('timeupdate', onTimeUpdate);
+            audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+            audio.removeEventListener('ended', onEnded);
+            audio.removeEventListener('error', onError);
+        };
+    }, []);
+
+    // Listening time: tick while playing, flush stats when playback stops
+    useEffect(() => {
+        if (!isPlaying) { flushStats(); return; }
+        const id = setInterval(() => {
+            setStats(prev => ({ ...prev, totalTime: (prev.totalTime || 0) + 1 }));
+        }, 1000);
+        return () => clearInterval(id);
+    }, [isPlaying, flushStats]);
+
     const playSong = (song, contextQueue = null) => {
+        if (!song) return;
+        errorStreakRef.current = 0; // a user-initiated play starts a fresh streak
         const activeQueue = contextQueue || songs;
         if (isShuffle) {
             const newShuffled = generateShuffledQueue(activeQueue, song.path);
@@ -277,21 +423,35 @@ export default function App() {
     const deletePlaylist = (id) => {
         if (confirm('Delete this playlist?')) {
             setPlaylists(prev => prev.filter(p => p.id !== id));
-            if (view === 'playlist' && selectedPlaylistId === id) setView('dashboard');
+            historyRef.current = historyRef.current.filter(h => !(h.view === 'playlist' && h.selectedPlaylistId === id));
+            if (view === 'playlist' && selectedPlaylistId === id) { setView('dashboard'); setSelectedPlaylistId(null); }
         }
     };
 
-    const openPlaylist = (id) => { setSelectedPlaylistId(id); setView('playlist'); };
+    const openPlaylist = (id) => navigate('playlist', id);
+    const toggleLyrics = () => {
+        if (view !== 'lyrics') navigate('lyrics');
+        else if (!goBack()) setView('library');
+    };
     const seek = (time) => { audioRef.current.currentTime = time; setCurrentTime(time); };
     const changeVolume = (vol) => { audioRef.current.volume = vol; setVolume(vol); };
 
-    const toggleMiniMode = () => {
-        if (!Platform.isElectron()) return;
-        if (!miniMode) { Platform.resize(300, 330); setMiniMode(true); }
-        else { Platform.resize(1000, 800); setMiniMode(false); }
-    };
-
     const currentSong = isShuffle ? shuffledQueue[playIndex] : queue[playIndex];
+    // The mini player renders nothing without a song, which would leave the user in an
+    // empty frameless window: refuse to enter mini mode when there is nothing to show.
+    const hasMiniContent = !!(currentSong || songs.length > 0);
+
+    const toggleMiniMode = () => {
+        if (!canMiniMode) return;
+        if (!miniMode) {
+            if (!hasMiniContent) return;
+            Platform.resize(300, 330);
+            setMiniMode(true);
+        } else {
+            Platform.resize(1000, 800);
+            setMiniMode(false);
+        }
+    };
 
     if (miniMode) {
         return (
@@ -337,13 +497,16 @@ export default function App() {
                         {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
                     </button>
 
-                    <button
-                        onClick={toggleMiniMode}
-                        title="Mini Player"
-                        style={{ marginRight: (isMac && !isMobile) ? 10 : 0 }}
-                    >
-                        <Minimize2 size={16} />
-                    </button>
+                    {canMiniMode && (
+                        <button
+                            onClick={toggleMiniMode}
+                            disabled={!hasMiniContent}
+                            title="Mini Player"
+                            style={{ marginRight: (isMac && !isMobile) ? 10 : 0 }}
+                        >
+                            <Minimize2 size={16} />
+                        </button>
+                    )}
 
                     {!isMac && Platform.isElectron() && (
                         <div className="window-controls">
@@ -358,7 +521,7 @@ export default function App() {
                 <div className={`sidebar-wrapper ${sidebarOpen ? 'open' : 'closed'}`}>
                     <Sidebar
                         view={view}
-                        setView={(v) => { setView(v); if (isMobile) setSidebarOpen(false); }}
+                        setView={(v) => { navigate(v); if (isMobile) setSidebarOpen(false); }}
                         onScan={loadSongs}
                         playlists={playlists}
                         smartPlaylists={smartPlaylists}
@@ -393,8 +556,8 @@ export default function App() {
                 onToggleShuffle={toggleShuffle} repeatMode={repeatMode} onToggleRepeat={toggleRepeat}
                 isFavorite={currentSong ? favorites.includes(currentSong.path) : false}
                 onToggleFavorite={() => currentSong && toggleFavorite(currentSong.path)}
-                onToggleLyrics={() => setView(view === 'lyrics' ? 'library' : 'lyrics')}
-                currentView={view} onToggleMiniMode={toggleMiniMode}
+                onToggleLyrics={toggleLyrics}
+                currentView={view} onToggleMiniMode={toggleMiniMode} canMiniMode={canMiniMode}
             />
         </div>
     );

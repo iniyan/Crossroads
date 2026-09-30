@@ -7,7 +7,6 @@ const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], o
     const [newName, setNewName] = useState('');
 
     const handleCreateSubmit = () => {
-        console.log('Sidebar: handleCreateSubmit', newName);
         if (newName.trim()) {
             onCreatePlaylist(newName.trim());
             setNewName('');
@@ -58,7 +57,6 @@ const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], o
                             key={pl.id}
                             className={`nav-item sm ${view === 'playlist' && pl.id === selectedPlaylistId ? 'active' : ''}`}
                             onClick={() => {
-                                console.log('Opening smart playlist:', pl.id);
                                 onOpenPlaylist(pl.id);
                             }}
                         >
@@ -71,7 +69,6 @@ const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], o
                 <div className="section-title">
                     USER PLAYLISTS
                     <button className="add-pl-btn" title="Create Playlist" onClick={e => {
-                        console.log('Plus button clicked');
                         e.stopPropagation();
                         setIsCreating(true);
                     }}>
@@ -104,7 +101,6 @@ const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], o
                             key={pl.id}
                             className={`nav-item sm ${view === 'playlist' && pl.id === selectedPlaylistId ? 'active' : ''}`}
                             onClick={() => {
-                                console.log('Opening user playlist:', pl.id);
                                 onOpenPlaylist(pl.id);
                             }}
                         >
