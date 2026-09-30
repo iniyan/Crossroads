@@ -13,6 +13,7 @@ always sees the full `Song` shape documented in [`song.js`](./song.js).
 | `trackKey.js` | Stable cross-device identity: `mb:<uuid>` from MUSICBRAINZ_TRACKID / RELEASETRACKID, else `meta:<artist>\|<album>\|<disc>\|<track>\|<title>` from `normalizeText()` (NFKD, lowercase, no diacritics/punctuation, no "feat. …" suffix when it is a separate word). No audio property is part of the key. |
 | `tags.js` | Helpers for the `tags` map: `firstTag`, `tagValues`, `parseNumberPair('7/12')`, `parseYear`. |
 | `playHistory.js` | Play-history entries `{ path, timestamp, trackKey, listened }`, `appendPlay` (records `path` always, `trackKey` only once the song is no longer `provisional`), `setListened`, `backfillTrackKeys` (fills keys by path after a rescan), and the `ListenTimer` used by `App.jsx`. |
+| `wrapped.js` | Crossroads Wrapped (#27): `periodOf` / `shiftPeriod` / `availablePeriods` (ISO week Mon–Sun, month, year; local-time boundaries built with `new Date(y, m, d)` so DST never shifts them) and `computeWrapped({ stats, songs, period })`: listening seconds (`listened`, falling back to the song duration for legacy entries and flagging `estimated`), hours per quality tier, top tracks/albums/artists/composers by plays and by time, first-ever plays (`discoveries`, aware of `archivedCounts`), longest daily streak, by-hour/by-weekday and most-played format. Entries are matched by `trackKey`, then `path`; songs missing from the library still count. |
 
 ## Song fields
 

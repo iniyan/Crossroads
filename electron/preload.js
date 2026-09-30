@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('electron', {
     maximize: () => ipcRenderer.send('window:maximize'),
     resize: (width, height) => ipcRenderer.send('window:resize', width, height),
     close: () => ipcRenderer.send('window:close'),
+    // Save dialog for a PNG rendered by the renderer (Wrapped export); base64 without prefix.
+    saveImage: (filename, base64) => ipcRenderer.invoke('image:save', filename, base64),
 
     // Events: each returns an unsubscribe function.
     onShortcut: (callback) => subscribe('shortcut', callback, ([type]) => [type]),
