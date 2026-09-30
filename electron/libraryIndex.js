@@ -115,6 +115,16 @@ class LibraryIndex {
     }
 
     /**
+     * Drops the entry for one file (it was rewritten; the next lookup must re-parse it rather
+     * than trust a size/mtime match). Returns whether an entry was there.
+     */
+    delete(file) {
+        const had = this.entries.delete(file);
+        if (had) this.dirty = true;
+        return had;
+    }
+
+    /**
      * Drops entries under `root` whose path is not in `livePaths` (deleted or moved files).
      * Entries outside `root` are kept so switching music folders back and forth stays cheap.
      * Nothing is dropped when `livePaths` is empty: an empty listing is far more likely a

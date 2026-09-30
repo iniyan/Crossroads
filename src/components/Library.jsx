@@ -4,7 +4,7 @@ import { formatTime, formatTotalTime } from '../utils/format';
 import Artwork from './Artwork';
 import '../styles/Library.css';
 
-const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites = [], onToggleFavorite }) => {
+const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites = [], onToggleFavorite, onTrackInfo, onEditTags, onMusicBrainz }) => {
     const [selectedAlbum, setSelectedAlbum] = useState(null);
     const [contextMenu, setContextMenu] = useState(null);
 
@@ -117,6 +117,10 @@ const Library = ({ songs, onPlaySong, playlists = [], onAddToPlaylist, favorites
 
                 {contextMenu && (
                     <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
+                        {onTrackInfo && <div className="menu-item" onClick={() => onTrackInfo(contextMenu.song, selectedAlbum.songs)}>Track info</div>}
+                        {onEditTags && <div className="menu-item" onClick={() => onEditTags([contextMenu.song])}>Edit tags…</div>}
+                        {onEditTags && selectedAlbum.songs.length > 1 && <div className="menu-item" onClick={() => onEditTags(selectedAlbum.songs)}>Edit album tags…</div>}
+                        {onMusicBrainz && <div className="menu-item" onClick={() => onMusicBrainz(selectedAlbum.songs)}>MusicBrainz lookup…</div>}
                         <div className="menu-header">Add to Playlist</div>
                         {playlists.length === 0 ? (
                             <div className="menu-item disabled">No Playlists</div>

@@ -260,6 +260,11 @@ final class LibraryIndexDb extends SQLiteOpenHelper {
         return stale.size();
     }
 
+    /** Drops the row for one path (the file was rewritten; the next lookup re-probes it). */
+    synchronized void delete(String path) {
+        getWritableDatabase().delete(TABLE, "path = ?", new String[] {path});
+    }
+
     long count() {
         try (Cursor c = getReadableDatabase().rawQuery("SELECT COUNT(*) FROM " + TABLE, null)) {
             return c.moveToFirst() ? c.getLong(0) : 0;
