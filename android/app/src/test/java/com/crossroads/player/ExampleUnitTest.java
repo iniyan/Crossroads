@@ -1,4 +1,4 @@
-package com.getcapacitor.myapp;
+package com.crossroads.player;
 
 import static org.junit.Assert.*;
 
