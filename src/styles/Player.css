@@ -395,3 +395,34 @@ input[type=range].seek-slider:active::-webkit-slider-thumb {
         height: 44px;
     }
 }
+/* Vinyl mode entry (#26) and DSP indicator (#24) */
+.track-art.clickable {
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.track-art.clickable:hover {
+    transform: scale(1.05);
+}
+
+.dsp-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-right: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    background: rgba(34, 211, 238, 0.15);
+    color: var(--accent-monitor);
+    vertical-align: middle;
+}
+
+@media (max-width: 768px) {
+    /* the album art opens vinyl mode on phones; keep the control row from overflowing */
+    .vinyl-btn {
+        display: none;
+    }
+}
