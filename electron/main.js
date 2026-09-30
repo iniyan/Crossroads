@@ -56,7 +56,7 @@ const APP_MIME_TYPES = {
 };
 
 // Keys the renderer may read/write through the store bridge.
-const STORE_KEYS = new Set(['stats', 'playlists', 'favorites', 'theme', 'musicFolder']);
+const STORE_KEYS = new Set(['stats', 'playlists', 'favorites', 'theme', 'musicFolder', 'libraryFilters']);
 
 const MIME_TYPES = {
     '.flac': 'audio/flac',

@@ -1,0 +1,40 @@
+.recording { margin-bottom: 36px; }
+
+.recording-head {
+    display: flex;
+    gap: 20px;
+    align-items: flex-end;
+    margin-bottom: 14px;
+}
+
+.recording-cover {
+    width: 120px;
+    height: 120px;
+    flex-shrink: 0;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #222;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.recording-cover img { width: 100%; height: 100%; object-fit: cover; }
+.recording-info { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.recording-album { font-size: 18px; font-weight: 700; }
+.recording-who { font-size: 14px; color: var(--text-primary); }
+.recording-perf { font-size: 13px; color: var(--text-secondary); }
+
+.recording-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.recording-actions .play-all-btn,
+.recording-actions .shuffle-btn-flat { padding: 8px 18px; font-size: 14px; }
+
+@media (max-width: 768px) {
+    .recording-head { flex-direction: column; align-items: flex-start; }
+    .recording-cover { width: 96px; height: 96px; }
+}
