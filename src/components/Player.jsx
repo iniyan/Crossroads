@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Repeat, Shuffle, Heart, Quote, Minimize2 } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, Repeat, Shuffle, Heart, Quote, Minimize2, Info } from 'lucide-react';
 import { formatTime } from '../utils/format';
 import Artwork from './Artwork';
 import QualityBadge from './QualityBadge';
@@ -24,6 +24,7 @@ const Player = ({
     isFavorite,
     onToggleFavorite,
     onToggleLyrics,
+    onTrackInfo,
     currentView,
     onToggleMiniMode,
     canMiniMode = true
@@ -119,6 +120,12 @@ const Player = ({
                     >
                         <Quote size={18} />
                     </button>
+
+                    {onTrackInfo && (
+                        <button className="icon-btn sm" onClick={onTrackInfo} disabled={!currentSong} title="Track info">
+                            <Info size={18} />
+                        </button>
+                    )}
 
                     {canMiniMode && (
                         <button

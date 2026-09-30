@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, globalShortcut, Menu, protocol, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, globalShortcut, Menu, protocol, session, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -7,6 +7,7 @@ const Store = require('electron-store');
 const { scanLibrary, readTrackDetails, isInside, AUDIO_EXTENSIONS, ART_HOST } = require('./libraryScanner');
 const { LibraryIndex } = require('./libraryIndex');
 const { readEmbeddedPicture } = require('./artwork');
+const { registerMetadataIpc, installMusicBrainzUserAgent } = require('./metadataIpc');
 
 const store = new Store();
 
@@ -29,7 +30,7 @@ const CONTENT_SECURITY_POLICY = [
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data: blob: ${MEDIA_SCHEME}:`,
     `media-src 'self' blob: ${MEDIA_SCHEME}:`,
-    `connect-src 'self' https://lrclib.net ${MEDIA_SCHEME}:`,
+    `connect-src 'self' https://lrclib.net https://musicbrainz.org ${MEDIA_SCHEME}:`,
     "font-src 'self' data:",
     "object-src 'none'",
     "base-uri 'self'",
@@ -56,7 +57,7 @@ const APP_MIME_TYPES = {
 };
 
 // Keys the renderer may read/write through the store bridge.
-const STORE_KEYS = new Set(['stats', 'playlists', 'favorites', 'theme', 'musicFolder', 'libraryFilters']);
+const STORE_KEYS = new Set(['stats', 'playlists', 'favorites', 'theme', 'musicFolder', 'libraryFilters', 'lyricsSettings']);
 
 const MIME_TYPES = {
     '.flac': 'audio/flac',
@@ -572,6 +573,13 @@ ipcMain.handle('app:getTrackDetails', async (_event, filePath, options) => {
     });
 });
 
+// Tag writing, .lrc sidecars and playlist files (electron/metadataIpc.js)
+registerMetadataIpc({
+    ipcMain, dialog, getWindow,
+    getMusicRoot: () => allowedMusicRoot,
+    resolveLibraryFile, enqueueIndexJob, getLibraryIndex, modelVersionOf
+});
+
 // Window Controls
 ipcMain.on('window:minimize', () => {
     const win = getWindow();
@@ -601,6 +609,7 @@ ipcMain.on('window:close', () => {
 
 app.whenReady().then(() => {
     protocol.handle(MEDIA_SCHEME, handleMediaRequest);
+    installMusicBrainzUserAgent(session.defaultSession);
     // In dev, Vite serves the renderer (and needs inline scripts / websockets for HMR).
     if (!IS_DEV) protocol.handle(APP_SCHEME, handleAppRequest);
     registerMediaShortcuts();
