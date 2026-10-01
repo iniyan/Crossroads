@@ -7,6 +7,7 @@ const Store = require('electron-store');
 const { scanLibrary, readTrackDetails, isInside, AUDIO_EXTENSIONS, ART_HOST } = require('./libraryScanner');
 const { LibraryIndex } = require('./libraryIndex');
 const { readEmbeddedPicture } = require('./artwork');
+const { registerSyncIpc } = require('./sync/ipc');
 
 const store = new Store();
 
@@ -55,8 +56,9 @@ const APP_MIME_TYPES = {
     '.txt': 'text/plain; charset=utf-8'
 };
 
-// Keys the renderer may read/write through the store bridge.
-const STORE_KEYS = new Set(['stats', 'playlists', 'favorites', 'theme', 'musicFolder']);
+// Keys the renderer may read/write through the store bridge ('sync': LAN sync state, #25;
+// peer keys live in their own 0600 file, see electron/sync/peerStore.mjs).
+const STORE_KEYS = new Set(['stats', 'playlists', 'favorites', 'theme', 'musicFolder', 'sync']);
 
 const MIME_TYPES = {
     '.flac': 'audio/flac',
@@ -599,6 +601,9 @@ ipcMain.on('window:close', () => {
     if (win) win.close();
 });
 
+// LAN sync host (#25): HTTP server + mDNS in this process, data merged by the renderer.
+let lanSync = null;
+
 app.whenReady().then(() => {
     protocol.handle(MEDIA_SCHEME, handleMediaRequest);
     // In dev, Vite serves the renderer (and needs inline scripts / websockets for HMR).
@@ -606,14 +611,22 @@ app.whenReady().then(() => {
     registerMediaShortcuts();
     setCustomMenu();
     createWindow();
+    lanSync = registerSyncIpc({ app, ipcMain, getWindow, sendToRenderer });
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
 });
 
-app.on('will-quit', () => {
+// Quit waits (bounded, see ipc.js) for the sync server to say goodbye on mDNS and finish its
+// peer-file writes, then quits for real.
+let lanSyncShutDown = false;
+app.on('will-quit', (event) => {
     globalShortcut.unregisterAll();
+    if (!lanSync || lanSyncShutDown) return;
+    event.preventDefault();
+    lanSyncShutDown = true;
+    lanSync.shutdown().catch(() => {}).then(() => app.quit());
 });
 
 app.on('window-all-closed', () => {

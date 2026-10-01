@@ -6,10 +6,12 @@ import Library from './components/Library';
 import PlaylistView from './components/PlaylistView';
 import MiniPlayer from './components/MiniPlayer';
 import LyricsView from './components/LyricsView';
+import SyncView from './components/SyncView';
 import { Minimize2, Minus, Square, X, Menu, Sun, Moon } from 'lucide-react';
 import './styles/global.css';
 import Platform from './services/PlatformService';
 import { appendPlay, backfillTrackKeys, setListened, ListenTimer } from './library/playHistory';
+import useLanSync from './sync/useLanSync';
 
 const STATS_SAVE_INTERVAL = 15000;
 const MAX_VIEW_HISTORY = 20;
@@ -151,6 +153,17 @@ export default function App() {
     useEffect(() => { if (isLoaded('playlists')) persist('playlists', playlists); }, [playlists]);
     useEffect(() => { if (isLoaded('favorites')) persist('favorites', favorites); }, [favorites]);
 
+    // LAN sync (#25, src/sync/): merges paired devices' favorites / playlists / plays into
+    // the state above. Only once every key has been read, so defaults are never synced out.
+    // Plays a sync applies are flagged "applied" in the sync store right away, so the stats
+    // holding them are persisted on their very next render instead of after the throttle.
+    const statsFlushRequestedRef = useRef(false);
+    const lanSync = useLanSync({
+        songs, favorites, playlists, stats, setFavorites, setPlaylists, setStats,
+        isReady: () => ['favorites', 'playlists', 'stats'].every(isLoaded),
+        onPlaysApplied: () => { statsFlushRequestedRef.current = true; }
+    });
+
     // Stats persistence: throttled to once per STATS_SAVE_INTERVAL, flushed on pause/hide
     const flushStats = useCallback(() => {
         clearTimeout(statsSaveTimer.current);
@@ -180,6 +193,7 @@ export default function App() {
         statsRef.current = stats;
         if (!isLoaded('stats')) return;
         statsDirtyRef.current = true;
+        if (statsFlushRequestedRef.current) { statsFlushRequestedRef.current = false; flushStats(); return; }
         const elapsed = Date.now() - lastStatsSaveRef.current;
         if (elapsed >= STATS_SAVE_INTERVAL) { flushStats(); return; }
         clearTimeout(statsSaveTimer.current);
@@ -642,6 +656,7 @@ export default function App() {
                         />
                     )}
                     {view === 'lyrics' && <LyricsView currentSong={currentSong} currentTime={currentTime} />}
+                    {view === 'sync' && <SyncView sync={lanSync} />}
                     {view === 'playlist' && (
                         <PlaylistView
                             playlist={smartPlaylists.find(p => p.id === selectedPlaylistId) || playlists.find(p => p.id === selectedPlaylistId)}
