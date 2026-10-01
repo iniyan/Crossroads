@@ -103,9 +103,11 @@ public class RangeAwareWebViewClient extends BridgeWebViewClient {
             return new WebResourceResponse(mimeType, null, 200, "OK", headers, new FileInputStream(file));
         }
 
+        // The WebView skips the request's first-byte-pos from this stream itself, so the
+        // stream only moves for suffix ranges (see ByteRange.streamPosition()).
         FileInputStream in = new FileInputStream(file);
         try {
-            in.getChannel().position(range.start);
+            if (range.streamPosition() > 0) in.getChannel().position(range.streamPosition());
         } catch (IOException e) {
             in.close();
             throw e;
@@ -118,7 +120,7 @@ public class RangeAwareWebViewClient extends BridgeWebViewClient {
             206,
             "Partial Content",
             headers,
-            new BoundedInputStream(in, range.length())
+            new BoundedInputStream(in, range.streamLimit())
         );
     }
 

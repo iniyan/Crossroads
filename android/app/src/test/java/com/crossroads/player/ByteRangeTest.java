@@ -136,4 +136,28 @@ public class ByteRangeTest {
         assertEquals("audio/ogg", RangeAwareWebViewClient.mimeTypeFor("song.opus"));
         assertEquals("application/octet-stream", RangeAwareWebViewClient.mimeTypeFor("noext"));
     }
+
+    @Test
+    public void explicitRangeLeavesStreamAtZeroForChromiumToSkip() throws Exception {
+        ByteRange r = parse("bytes=10-19", 100);
+        assertEquals(false, r.suffix);
+        assertEquals(0, r.streamPosition());
+        assertEquals(20, r.streamLimit()); // Chromium skips 10, then reads the 10 of the range
+        assertEquals(10, r.length());      // Content-Length still describes the range
+    }
+
+    @Test
+    public void openEndedRangeLeavesStreamAtZero() throws Exception {
+        ByteRange r = parse("bytes=90-", 100);
+        assertEquals(0, r.streamPosition());
+        assertEquals(100, r.streamLimit());
+    }
+
+    @Test
+    public void suffixRangeIsPositionedHere() throws Exception {
+        ByteRange r = parse("bytes=-10", 100);
+        assertEquals(true, r.suffix);
+        assertEquals(90, r.streamPosition());
+        assertEquals(10, r.streamLimit());
+    }
 }
