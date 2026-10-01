@@ -21,14 +21,34 @@ public final class ByteRange {
 
     public final long start;
     public final long end;
+    /** True for a suffix range ({@code bytes=-N}), which carries no first-byte-pos. */
+    public final boolean suffix;
 
-    private ByteRange(long start, long end) {
+    private ByteRange(long start, long end, boolean suffix) {
         this.start = start;
         this.end = end;
+        this.suffix = suffix;
     }
 
     public long length() {
         return end - start + 1;
+    }
+
+    /**
+     * Where the stream handed to the WebView must be positioned. Chromium's WebView loader
+     * applies the request's first-byte-pos itself: it skips that many bytes of the stream an
+     * intercepted response returns (android_webview InputStreamReader::Seek), so for an
+     * explicit start the stream must begin at byte 0 or the body is served from twice the
+     * offset. A suffix range has no first-byte-pos, so Chromium skips nothing and the stream
+     * has to be positioned here.
+     */
+    public long streamPosition() {
+        return suffix ? start : 0;
+    }
+
+    /** How many bytes of the stream (from {@link #streamPosition()}) the WebView may read. */
+    public long streamLimit() {
+        return suffix ? length() : end + 1;
     }
 
     public String contentRange(long total) {
@@ -58,14 +78,14 @@ public final class ByteRange {
                 // Suffix range: the last N bytes.
                 long suffix = Long.parseLong(last);
                 if (suffix == 0 || total <= 0) throw new UnsatisfiableException("empty suffix range");
-                return new ByteRange(Math.max(0, total - suffix), total - 1);
+                return new ByteRange(Math.max(0, total - suffix), total - 1, true);
             }
 
             long start = Long.parseLong(first);
             long end = last.isEmpty() ? Long.MAX_VALUE : Long.parseLong(last);
             if (end < start) return null; // invalid byte-range-spec: ignore the header
             if (start >= total) throw new UnsatisfiableException("range starts past end of resource");
-            return new ByteRange(start, Math.min(end, total - 1));
+            return new ByteRange(start, Math.min(end, total - 1), false);
         } catch (NumberFormatException e) {
             return null;
         }
