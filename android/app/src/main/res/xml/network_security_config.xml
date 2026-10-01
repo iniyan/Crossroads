@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext stays disabled for every platform HTTP stack (WebView, HttpURLConnection, OkHttp,
+  Cronet). LAN sync (#25) talks plain HTTP to the paired desktop, but through its own tiny
+  HTTP/1.1 client over a raw socket (LanHttpClient.java, reachable only via
+  SyncDiscoveryPlugin.request and only for http://<private IP literal>:<port>/v1/...,
+  LanAddress.java). Raw sockets are not governed by this policy, so the one cleartext path is
+  the one the app controls, and every payload on it is AES-GCM encrypted and authenticated by
+  the app itself (src/sync/crypto.mjs). Nothing else in the app can accidentally use cleartext.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

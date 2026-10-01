@@ -14,6 +14,7 @@ const MediaLibrary = registerPlugin('MediaLibrary');
 const MediaSession = registerPlugin('MediaSession');
 const MediaFiles = registerPlugin('MediaFiles');   // SAF folder grants, tag writing, sidecars, playlist files
 const ImageExport = registerPlugin('ImageExport');
+const SyncDiscovery = registerPlugin('SyncDiscovery');   // LAN sync (#25): mDNS discovery, native HTTP, key storage
 
 // Sentinel persisted as 'musicFolder' on Android: the library comes from MediaStore, not a folder.
 const MEDIASTORE_SENTINEL = 'mediastore';
@@ -553,6 +554,93 @@ const PlatformService = {
                 handle = null;
             }
         };
+    },
+
+    // ---- LAN sync (#25, src/sync/) ----------------------------------------------------------
+    // Desktop hosts (Electron main process: electron/sync/), Android is the client. On
+    // Android the HTTP requests run natively (SyncDiscoveryPlugin.request over a raw socket):
+    // the WebView's https://localhost origin cannot call http://192.168.x.x (mixed content),
+    // and the plugin only talks to private LAN addresses. Peer keys and frame counters go
+    // through the Android Keystore (SecretStore.java); the small sync record lives in its own
+    // backup-excluded preferences file. The big model store is in IndexedDB (blobStore.js).
+    sync: {
+        mode: isElectron ? 'host' : isAndroid ? 'client' : null,
+        host: isElectron ? window.electron.sync : null,
+
+        getDeviceName: async () => {
+            if (isAndroid) {
+                try {
+                    const info = await Device.getInfo();
+                    return info.name || info.model || 'Android phone';
+                } catch (e) {
+                    return 'Android phone';
+                }
+            }
+            return 'This device';
+        },
+
+        // The small sync record (identity, peers, watermarks). Desktop: electron-store key
+        // 'sync'; Android: SyncDiscoveryPlugin's own preferences file (excluded from backups).
+        getRecord: async () => {
+            if (isElectron) return window.electron.getStore('sync');
+            if (!isAndroid) return null;
+            const { value } = await SyncDiscovery.getState();
+            if (!value) return null;
+            try { return JSON.parse(value); } catch (e) { return null; }
+        },
+        setRecord: async (record) => {
+            if (isElectron) { await window.electron.setStore('sync', record); return; }
+            if (isAndroid) await SyncDiscovery.setState({ value: JSON.stringify(record) });
+        },
+
+        // onFound({ name, host, port, txt: { v, s, h } }), onLost({ name }). Unsubscribe stops discovery.
+        startDiscovery: (onFound, onLost) => {
+            if (!isAndroid) return noop;
+            const handles = [];
+            let stopped = false;
+            const add = (event, cb) => SyncDiscovery.addListener(event, cb).then((h) => { if (stopped) h.remove(); else handles.push(h); });
+            Promise.all([add('serviceFound', onFound), add('serviceLost', onLost || noop)])
+                .then(() => { if (!stopped) return SyncDiscovery.startDiscovery(); })
+                .catch((e) => console.error('SyncDiscovery.startDiscovery failed', e));
+            return () => {
+                stopped = true;
+                handles.forEach(h => h.remove());
+                SyncDiscovery.stopDiscovery().catch(() => {});
+            };
+        },
+
+        // Native HTTP to a LAN address: { url, method, body } -> { status, body }. Rejects with
+        // a plain Error (network) when the computer cannot be reached.
+        request: async ({ url, method, body, timeoutMs = 20000 }) => {
+            if (!isAndroid) throw new Error('Not available on this platform');
+            const result = await SyncDiscovery.request({ url, method, body: body ?? '', timeoutMs });
+            return { status: result.status, body: result.body };
+        },
+
+        // Secrets: a rejection with code 'transient' means "exists, retry later" (the key is kept).
+        getSecret: async (key) => {
+            if (!isAndroid) return null;
+            try {
+                return (await SyncDiscovery.getSecret({ key })).value ?? null;
+            } catch (e) {
+                const err = new Error(e?.message || 'Could not read the pairing key');
+                err.code = e?.code === 'transient' ? 'transient' : 'storage';
+                throw err;
+            }
+        },
+        setSecret: async (key, value) => { if (isAndroid) await SyncDiscovery.setSecret({ key, value }); },
+        deleteSecret: async (key) => { if (isAndroid) await SyncDiscovery.deleteSecret({ key }); },
+
+        // Fires when the app returns to the foreground (auto-sync trigger). Returns an unsubscribe.
+        onForeground: (callback) => {
+            if (!isAndroid || typeof callback !== 'function') return noop;
+            let handle = null;
+            let removed = false;
+            App.addListener('appStateChange', ({ isActive }) => { if (isActive) callback(); })
+                .then((h) => { if (removed) h.remove(); else handle = h; })
+                .catch((e) => console.error('appStateChange listener failed', e));
+            return () => { removed = true; if (handle) { handle.remove(); handle = null; } };
+        }
     }
 };
 

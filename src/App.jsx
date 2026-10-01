@@ -11,6 +11,7 @@ import ClassicalView from './components/ClassicalView';
 import EqualizerView from './components/EqualizerView';
 import WrappedView from './components/WrappedView';
 import VinylView from './components/VinylView';
+import SyncView from './components/SyncView';
 import { Minimize2, Minus, Square, X, Menu, Sun, Moon } from 'lucide-react';
 import './styles/global.css';
 import Platform from './services/PlatformService';
@@ -22,6 +23,7 @@ import { DspEngine } from './audio/dsp';
 import { DSP_STORE_KEY, DEFAULT_DSP_STATE, normalizeDspState } from './audio/dspState';
 import { useQualityLibrary } from './components/quality/QualityProvider';
 import qualityStore from './analysis/qualityStore';
+import useLanSync from './sync/useLanSync';
 
 const STATS_SAVE_INTERVAL = 15000;
 const DSP_SAVE_DELAY = 500;                 // trailing debounce for the dsp settings (sliders fire per step)
@@ -218,6 +220,16 @@ export default function App() {
         if (debug) window.__crossroadsDsp = engine;
         return () => { unsub(); if (debug) delete window.__crossroadsDsp; };
     }, []);
+    // LAN sync (#25, src/sync/): merges paired devices' favorites / playlists / plays into
+    // the state above. Only once every key has been read, so defaults are never synced out.
+    // Plays a sync applies are flagged "applied" in the sync store right away, so the stats
+    // holding them are persisted on their very next render instead of after the throttle.
+    const statsFlushRequestedRef = useRef(false);
+    const lanSync = useLanSync({
+        songs, favorites, playlists, stats, setFavorites, setPlaylists, setStats,
+        isReady: () => ['favorites', 'playlists', 'stats'].every(isLoaded),
+        onPlaysApplied: () => { statsFlushRequestedRef.current = true; }
+    });
 
     // Stats persistence: throttled to once per STATS_SAVE_INTERVAL, flushed on pause/hide
     const flushStats = useCallback(() => {
@@ -248,6 +260,7 @@ export default function App() {
         statsRef.current = stats;
         if (!isLoaded('stats')) return;
         statsDirtyRef.current = true;
+        if (statsFlushRequestedRef.current) { statsFlushRequestedRef.current = false; flushStats(); return; }
         const elapsed = Date.now() - lastStatsSaveRef.current;
         if (elapsed >= STATS_SAVE_INTERVAL) { flushStats(); return; }
         clearTimeout(statsSaveTimer.current);
@@ -748,6 +761,7 @@ export default function App() {
                     {view === 'lyrics' && <LyricsView currentSong={currentSong} currentTime={currentTime} />}
                     {view === 'equalizer' && <EqualizerView dsp={dsp} onChange={setDsp} engine={dspRef.current} />}
                     {view === 'wrapped' && <WrappedView stats={stats} songs={songs} onPlaySong={playSong} />}
+                    {view === 'sync' && <SyncView sync={lanSync} />}
                     {view === 'playlist' && (
                         <PlaylistView
                             playlist={smartPlaylists.find(p => p.id === selectedPlaylistId) || playlists.find(p => p.id === selectedPlaylistId)}

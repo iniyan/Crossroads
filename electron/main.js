@@ -8,6 +8,7 @@ const { scanLibrary, readTrackDetails, isInside, AUDIO_EXTENSIONS, ART_HOST } = 
 const { LibraryIndex } = require('./libraryIndex');
 const { readEmbeddedPicture } = require('./artwork');
 const { registerMetadataIpc, installMusicBrainzUserAgent } = require('./metadataIpc');
+const { registerSyncIpc } = require('./sync/ipc');
 
 const store = new Store();
 
@@ -62,8 +63,9 @@ const APP_MIME_TYPES = {
     '.txt': 'text/plain; charset=utf-8'
 };
 
-// Keys the renderer may read/write through the store bridge ('dsp': EQ / crossfeed settings, #24).
-const STORE_KEYS = new Set(['stats', 'playlists', 'favorites', 'theme', 'musicFolder', 'libraryFilters', 'lyricsSettings', 'dsp']);
+// Keys the renderer may read/write through the store bridge ('dsp': EQ / crossfeed settings, #24;
+// 'sync': LAN sync state, #25 — peer keys live in their own 0600 file, see electron/sync/peerStore.mjs).
+const STORE_KEYS = new Set(['stats', 'playlists', 'favorites', 'theme', 'musicFolder', 'libraryFilters', 'lyricsSettings', 'dsp', 'sync']);
 // Keys an earlier build kept here and which now live in IndexedDB (src/services/blobStore.js):
 // the renderer may read them once for its migration and clear them, never write them.
 const LEGACY_STORE_KEYS = new Set(['autoeqIndex', 'autoeqProfiles']);
@@ -691,6 +693,9 @@ ipcMain.on('window:close', () => {
     if (win) win.close();
 });
 
+// LAN sync host (#25): HTTP server + mDNS in this process, data merged by the renderer.
+let lanSync = null;
+
 app.whenReady().then(() => {
     protocol.handle(MEDIA_SCHEME, handleMediaRequest);
     installMusicBrainzUserAgent(session.defaultSession);
@@ -699,14 +704,22 @@ app.whenReady().then(() => {
     registerMediaShortcuts();
     setCustomMenu();
     createWindow();
+    lanSync = registerSyncIpc({ app, ipcMain, getWindow, sendToRenderer });
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
 });
 
-app.on('will-quit', () => {
+// Quit waits (bounded, see ipc.js) for the sync server to say goodbye on mDNS and finish its
+// peer-file writes, then quits for real.
+let lanSyncShutDown = false;
+app.on('will-quit', (event) => {
     globalShortcut.unregisterAll();
+    if (!lanSync || lanSyncShutDown) return;
+    event.preventDefault();
+    lanSyncShutDown = true;
+    lanSync.shutdown().catch(() => {}).then(() => app.quit());
 });
 
 app.on('window-all-closed', () => {

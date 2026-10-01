@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Home, Library, Disc, Music, ListMusic, Plus, Sparkles, Check, X, Quote, Folder, User, Upload, SlidersHorizontal, Gift } from 'lucide-react';
+import { Home, Library, Disc, Music, ListMusic, Plus, Sparkles, Check, X, Quote, Folder, User, Upload, SlidersHorizontal, Gift, RefreshCw } from 'lucide-react';
 import '../styles/Sidebar.css';
 
 const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], onCreatePlaylist, onImportPlaylist, onOpenPlaylist, selectedPlaylistId, hasClassical = false }) => {
@@ -78,6 +78,13 @@ const Sidebar = ({ view, setView, onScan, playlists = [], smartPlaylists = [], o
                 >
                     <Gift size={20} />
                     <span>Wrapped</span>
+                </div>
+                <div
+                    className={`nav-item ${view === 'sync' ? 'active' : ''}`}
+                    onClick={() => setView('sync')}
+                >
+                    <RefreshCw size={20} />
+                    <span>Sync</span>
                 </div>
 
                 <div className="section-title">SMART PLAYLISTS</div>
