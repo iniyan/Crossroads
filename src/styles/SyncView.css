@@ -1,0 +1,277 @@
+.sync-view {
+    animation: fadeIn 0.4s ease-out;
+    max-width: 760px;
+}
+
+.sync-view h1 {
+    margin: 0 0 20px;
+}
+
+.sync-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: var(--glass-border);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.sync-card h3 {
+    margin: 0;
+    font-size: 15px;
+}
+
+.sync-card p {
+    margin: 0;
+}
+
+.sync-muted {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.sync-toggle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.sync-toggle.disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.sync-toggle input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.sync-toggle-track {
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.15);
+    position: relative;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+
+.sync-toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: white;
+    transition: transform 0.2s;
+}
+
+.sync-toggle input:checked + .sync-toggle-track {
+    background: var(--accent-color);
+}
+
+.sync-toggle input:checked + .sync-toggle-track .sync-toggle-thumb {
+    transform: translateX(18px);
+}
+
+.sync-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.sync-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    transform: none;
+}
+
+.sync-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.sync-btn.primary {
+    background: var(--accent-color);
+    border-color: transparent;
+    color: white;
+}
+
+.sync-btn.danger:hover {
+    background: rgba(232, 17, 35, 0.25);
+}
+
+.sync-btn.wide {
+    width: 100%;
+    justify-content: flex-start;
+}
+
+.sync-btn .spin {
+    animation: sync-spin 1s linear infinite;
+}
+
+@keyframes sync-spin {
+    to { transform: rotate(360deg); }
+}
+
+.sync-peers {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.sync-peer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.sync-peer-icon {
+    color: var(--accent-monitor);
+    display: flex;
+}
+
+.sync-peer-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.sync-peer-name {
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.sync-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.06);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.sync-badge.online {
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.12);
+}
+
+.sync-pairing {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+/* The six digits: a block of their own (never inline with a device name), left-to-right, isolated. */
+.sync-code {
+    display: block;
+    width: 100%;
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-size: 40px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent-monitor);
+    padding: 10px 0;
+    user-select: text;
+}
+
+/* A name chosen by the other device: an isolated LTR run that cannot reorder its neighbours. */
+.sync-name {
+    direction: ltr;
+    unicode-bidi: isolate;
+    overflow-wrap: anywhere;
+}
+
+.sync-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.sync-result {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #4ade80;
+}
+
+.sync-result.error {
+    color: #f87171;
+}
+
+.sync-discovered {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.sync-manual {
+    display: flex;
+    gap: 8px;
+}
+
+.sync-manual input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+    user-select: text;
+}
+
+.sync-manual input:focus {
+    border-color: var(--accent-color);
+}
+
+.sync-footnote {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* Key fingerprint shown next to a device name while pairing (same on both screens). */
+.sync-fingerprint {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85em;
+    opacity: 0.75;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(127, 127, 127, 0.15);
+    margin-left: 4px;
+}
+
+.sync-btn.small {
+    padding: 2px 8px;
+    font-size: 0.8em;
+    margin-left: 8px;
+}

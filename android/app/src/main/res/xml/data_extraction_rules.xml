@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+: same exclusions as backup_rules.xml for cloud backup and device-to-device transfer. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="crossroads_sync_secrets.xml" />
+        <exclude domain="sharedpref" path="crossroads_sync_state.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="crossroads_sync_secrets.xml" />
+        <exclude domain="sharedpref" path="crossroads_sync_state.xml" />
+    </device-transfer>
+</data-extraction-rules>

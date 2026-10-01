@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup (Android 11 and below; Android 12+ uses data_extraction_rules.xml). LAN sync (#25):
+  the pairing keys are wrapped by a Keystore key that never leaves this device, so a restored
+  copy is undecryptable, and a restored peer list would only promise syncs that cannot work.
+  Both files are left out; the user pairs again on the new device.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="crossroads_sync_secrets.xml" />
+    <exclude domain="sharedpref" path="crossroads_sync_state.xml" />
+</full-backup-content>
