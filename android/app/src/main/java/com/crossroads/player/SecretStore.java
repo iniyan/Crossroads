@@ -10,6 +10,7 @@ import android.security.keystore.KeyProperties;
 import android.util.Base64;
 
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
 
 import com.getcapacitor.Logger;
 
@@ -121,6 +122,7 @@ final class SecretStore {
     }
 
     /** API 33+: the Keystore says whether a failure is transient, and which key problem it was. */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private static boolean isPermanentKeyStoreError(KeyStoreException e) {
         if (e.isTransientFailure()) return false;
         int code = e.getNumericErrorCode();
